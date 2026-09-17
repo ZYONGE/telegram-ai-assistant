@@ -38,7 +38,7 @@
 | 패키지 관리 | uv. `uv.lock`으로 윈도우·맥·arm64 서버에서 같은 버전 사용 |
 | 메신저 | `python-telegram-bot`, **폴링 방식** (웹훅 사용 안 함) |
 | 모델 | Gemini (`google-genai`). 기본 `gemini-3.5-flash-lite`(대화·가벼운 작업 공통). 모델 이름과 제공사는 `config.toml`의 `[llm]`에서 관리. 모델 호출은 `app/llm/`에만 둔다 (`docs/adr/0004`) |
-| 모델 호출 경로 | Cloud 결제 계정을 연결한 Google Cloud 프로젝트로 호출한다 (B안, 무료 티어 데이터 학습 사용 회피). 기본은 그 프로젝트의 Gemini API 키, 선택으로 Vertex AI |
+| 모델 호출 경로 | 목표는 Cloud 결제 계정을 연결한 Google Cloud 프로젝트로 호출하는 것이다 (B안, 무료 티어 데이터 학습 사용 회피). 기본은 그 프로젝트의 Gemini API 키, 선택으로 Vertex AI. **현재는 결제 미연결 무료 티어 키로 운영 중** (`allow_free_tier = true`, 사용자님 결정) |
 | 저장소 | 구조화 데이터는 SQLite, 장기 기억만 마크다운 파일 |
 | 스케줄러 | APScheduler + SQLite 작업 저장 (재시작 후에도 예약 유지). 작업 원본은 `scheduled_tasks` 표, APScheduler는 메모리에서 시각만 계산 (`docs/adr/0002`) |
 | 외부 연동 | Google Calendar API, Gmail API(`gmail.modify`), 기상청 단기예보 API, 웹 검색 API |
@@ -228,7 +228,8 @@ assistant/
 - 2단계 (2026-09-17): 설정(`config.toml` + `.env`), SQLite(할 일·알림 기록), 알림 게이트, 발송기, 수집 입구, 텔레그램 발송, 가짜 수집기, 1회 실행(`python -m app.main`). 테스트 81개 통과
 - 3단계 (2026-09-18): 대화 루프(도구 13개, 확인 버튼), 기억(`data/memory.md`)·프로필 주입, 유휴 요약 압축, 리마인더·예약 작업, 아침·저녁 브리핑, 텔레그램 수신(허용 ID만), 상시 실행 진입점. ADR 0001~0003 작성. 2단계 테스트 데이터 정리 완료
 - 설계 변경 (2026-09-18, 사용자님 결정): 모델을 Claude → Gemini(`gemini-3.5-flash-lite`)로 바꾸고, 결제 연결 Google Cloud 프로젝트로 호출(B안), 모델 호출을 `app/llm/`로 모아 설정에서 제공사 교체. ADR 0004. 테스트 201개 통과
-- 다음 작업: 사용자님이 결제 연결 프로젝트의 `GEMINI_API_KEY`를 `.env`에 넣고 `[llm.gemini] billing_enabled = true`로 바꾼 뒤 실사용 확인 → 4단계 계획
+- 무료 티어 운영 (2026-09-18): 결제 미연결 키 사용. `billing_enabled = false` 유지, `allow_free_tier = true`로 명시 허용(실행마다 경고). 키·모델 ID 확인 완료. 테스트 203개 통과
+- 다음 작업: 사용자님 실사용 확인 → 4단계 계획. 결제를 연결하면 `billing_enabled = true`, `allow_free_tier = false`로 되돌린다
 - 실행: `py -3.14 -m uv run python -m app.main` (Ctrl+C로 종료)
 - 나중에 처리할 것
   - `collector_failed`의 ref_id가 원인별로 고정이라 같은 원인의 실패는 한 번만 알린다. 8단계(수집 실패 알림)에서 재알림 주기를 정한다

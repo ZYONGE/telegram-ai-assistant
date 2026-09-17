@@ -1,8 +1,9 @@
 """Gemini 어댑터 (Google Gen AI SDK).
 
 호출 방식 ([llm.gemini] backend)
-- "api_key": Cloud 결제 계정을 연결한 Google Cloud 프로젝트에서 발급한 Gemini API 키 (GEMINI_API_KEY).
-  무료 티어 키는 입력 내용이 제품 개선에 쓰일 수 있으므로, billing_enabled = true를 확인해야 시작한다.
+- "api_key": Gemini API 키 (GEMINI_API_KEY). 목표는 Cloud 결제 계정을 연결한 프로젝트의 키(B안)다.
+  무료 티어 키는 입력 내용이 제품 개선에 쓰일 수 있으므로, billing_enabled = true이거나
+  무료 티어 사용을 명시적으로 허용(allow_free_tier = true)해야 시작한다.
 - "vertex": 같은 프로젝트의 Vertex AI (서비스 계정 인증, GOOGLE_APPLICATION_CREDENTIALS).
 
 자동 함수 호출은 끈다. 도구 실행과 확인 단계는 우리 레지스트리가 맡는다.
@@ -10,6 +11,7 @@
 """
 
 import json
+import logging
 from collections.abc import Callable
 from typing import Any
 
@@ -22,6 +24,8 @@ from google.genai import types
 from app.core.config import ConfigError, LLMSettings
 from app.core.interfaces import ToolResult
 from app.llm.base import LLM, Finish, LLMError, ModelTurn, ToolCall, TransientLLMError, Turn
+
+logger = logging.getLogger(__name__)
 
 BACKENDS = ("api_key", "vertex")
 _BLOCKED = {
@@ -52,10 +56,15 @@ def _create_client(options: dict[str, Any], client_factory: Callable[..., Any]) 
     backend = options.get("backend", "api_key")
     if backend == "api_key":
         if options.get("billing_enabled") is not True:
-            raise ConfigError(
-                "Gemini 무료 티어는 입력 내용이 제품 개선에 쓰일 수 있습니다. "
-                "Cloud 결제 계정을 연결한 프로젝트의 API 키를 .env의 GEMINI_API_KEY에 넣은 뒤, "
-                "config.toml의 [llm.gemini] billing_enabled를 true로 바꾸세요."
+            if options.get("allow_free_tier") is not True:
+                raise ConfigError(
+                    "Gemini 무료 티어는 입력 내용이 제품 개선에 쓰일 수 있습니다. "
+                    "결제 계정을 연결한 프로젝트의 키를 쓰고 [llm.gemini] billing_enabled = true로 바꾸거나, "
+                    "무료 티어를 감수한다면 allow_free_tier = true로 바꾸세요."
+                )
+            logger.warning(
+                "Gemini 무료 티어로 실행합니다. 대화·프로필·할 일 내용이 Google 제품 개선에 쓰일 수 있습니다. "
+                "결제를 연결하면 billing_enabled = true, allow_free_tier = false로 바꾸세요."
             )
         try:
             # API 키는 SDK가 환경변수 GEMINI_API_KEY에서 읽는다 (.env는 load_settings가 불러 둠)

@@ -28,11 +28,23 @@ class ClientFactory:
         return self.client
 
 
-async def test_api_key_backend_requires_billing_confirmation():
+async def test_api_key_backend_requires_billing_or_free_tier_consent():
     factory = ClientFactory()
-    with pytest.raises(ConfigError, match="billing_enabled"):
+    with pytest.raises(ConfigError, match="billing_enabled.*allow_free_tier"):
         await gemini.create(settings(backend="api_key"), factory)
     assert factory.kwargs is None
+
+
+async def test_free_tier_runs_only_with_explicit_consent_and_warns(caplog):
+    factory = ClientFactory()
+    await gemini.create(settings(billing_enabled=False, allow_free_tier=True), factory)
+    assert factory.kwargs == {"vertexai": False}
+    assert "무료 티어로 실행합니다" in caplog.text
+
+
+async def test_billing_enabled_does_not_warn(caplog):
+    await gemini.create(settings(billing_enabled=True, allow_free_tier=True), ClientFactory())
+    assert "무료 티어" not in caplog.text
 
 
 async def test_api_key_backend_uses_developer_api_and_verifies_models():

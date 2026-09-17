@@ -67,6 +67,9 @@ def test_project_config_file_loads_with_env(tmp_path):
     assert settings.llm.provider == "gemini"
     assert settings.llm.chat_model == settings.llm.light_model == "gemini-3.5-flash-lite"
     assert settings.llm.options["backend"] == "api_key"
+    # 현재 운영 상태: 결제 미연결, 무료 티어 명시 허용
+    assert settings.llm.options["billing_enabled"] is False
+    assert settings.llm.options["allow_free_tier"] is True
 
 
 def test_llm_section_defaults_and_provider_options(tmp_path):
