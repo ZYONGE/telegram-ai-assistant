@@ -1,0 +1,16 @@
+# 참고 오픈소스 클론 (읽기 전용). docs/refs/ 메모는 추적해야 하므로 루트에만 적용
+/refs/
+
+# 런타임 데이터: DB, 기억 파일, profile.md, 브라우저 세션
+/data/
+
+# 비밀값
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
