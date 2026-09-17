@@ -101,6 +101,10 @@ MIGRATIONS: list[str] = [
         resolved_at  TEXT
     );
     """,
+    """
+    -- 모델 제공자 변경(Claude → Gemini)으로 대화 기록 형식이 바뀌어, 이전 기록은 다시 보내지 않는다.
+    UPDATE conversation_messages SET archived = 1 WHERE archived = 0;
+    """,
 ]
 
 

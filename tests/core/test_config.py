@@ -64,3 +64,27 @@ def test_project_config_file_loads_with_env(tmp_path):
     project_config = Path(__file__).parents[2] / "config.toml"
     settings = load_settings(project_config, env={"TELEGRAM_BOT_TOKEN": "t", "TELEGRAM_ALLOWED_USER_ID": "7"})
     assert settings.notification.quiet_end == time(6, 30)
+    assert settings.llm.provider == "gemini"
+    assert settings.llm.chat_model == settings.llm.light_model == "gemini-3.5-flash-lite"
+    assert settings.llm.options["backend"] == "api_key"
+
+
+def test_llm_section_defaults_and_provider_options(tmp_path):
+    minimal = load_settings(write_config(tmp_path), env={"TOKEN": "t", "USER_ID": "1"})
+    assert minimal.llm.provider == "gemini" and minimal.llm.options == {}
+
+    text = CONFIG + """
+[llm]
+provider = "other"
+chat_model = "big"
+
+[llm.other]
+region = "kr"
+
+[llm.gemini]
+backend = "vertex"
+"""
+    custom = load_settings(write_config(tmp_path, text), env={"TOKEN": "t", "USER_ID": "1"})
+    assert custom.llm.provider == "other"
+    assert custom.llm.chat_model == "big" and custom.llm.light_model == "gemini-3.5-flash-lite"
+    assert custom.llm.options == {"region": "kr"}

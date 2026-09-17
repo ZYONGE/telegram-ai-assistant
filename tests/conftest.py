@@ -1,9 +1,10 @@
-import copy
 from datetime import datetime
+from types import SimpleNamespace
 
 import pytest
-from anthropic.types import Message, TextBlock, ThinkingBlock, ToolUseBlock, Usage
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from google.genai import errors as genai_errors
+from google.genai import types
 
 from app.core.clock import KST
 from app.core.config import NotificationSettings
@@ -125,47 +126,64 @@ def task_service(task_repo, scheduler, dispatcher, clock):
     return TaskService(task_repo, scheduler, dispatcher, clock=clock)
 
 
-# --- Anthropic API 가짜 클라이언트 ---
+# --- Gemini API 가짜 클라이언트 (실제 GeminiModel 어댑터와 함께 쓴다) ---
 
 
-def text(value: str) -> TextBlock:
-    return TextBlock(type="text", text=value)
+def text_part(value: str, signature: bytes | None = None) -> types.Part:
+    return types.Part(text=value, thought_signature=signature)
 
 
-def tool_use(tool_id: str, name: str, args: dict) -> ToolUseBlock:
-    return ToolUseBlock(type="tool_use", id=tool_id, name=name, input=args)
+def call_part(call_id: str, name: str, args: dict, signature: bytes | None = None) -> types.Part:
+    return types.Part(function_call=types.FunctionCall(id=call_id, name=name, args=args), thought_signature=signature)
 
 
-def thinking(signature: str = "sig") -> ThinkingBlock:
-    return ThinkingBlock(type="thinking", thinking="", signature=signature)
+def gemini_response(*parts: types.Part, finish: str = "STOP") -> types.GenerateContentResponse:
+    content = types.Content(role="model", parts=list(parts)) if parts else None
+    return types.GenerateContentResponse(candidates=[types.Candidate(content=content, finish_reason=finish)])
 
 
-def response(*blocks, stop: str = "end_turn") -> Message:
-    return Message.model_construct(
-        id="msg_test",
-        type="message",
-        role="assistant",
-        model="test-model",
-        content=list(blocks),
-        stop_reason=stop,
-        stop_sequence=None,
-        usage=Usage(input_tokens=1, output_tokens=1),
+def blocked_prompt_response() -> types.GenerateContentResponse:
+    return types.GenerateContentResponse(
+        candidates=[], prompt_feedback=types.GenerateContentResponsePromptFeedback(block_reason="SAFETY")
     )
 
 
-class FakeMessages:
-    def __init__(self, responses) -> None:
-        self.responses = list(responses)
-        self.calls: list[dict] = []
+def server_error() -> genai_errors.ServerError:
+    return genai_errors.ServerError(503, {"error": {"code": 503, "message": "unavailable", "status": "UNAVAILABLE"}})
 
-    async def create(self, **kwargs):
-        self.calls.append(copy.deepcopy(kwargs))
+
+class FakeAsyncModels:
+    def __init__(self, responses, missing) -> None:
+        self.responses = list(responses)
+        self.missing = set(missing)
+        self.calls: list[dict] = []
+        self.checked: list[str] = []
+
+    async def generate_content(self, *, model, contents, config):
+        self.calls.append(
+            {
+                "model": model,
+                "contents": [c.model_dump(mode="json", exclude_none=True) for c in contents],
+                "config": config,
+            }
+        )
         item = self.responses.pop(0)
         if isinstance(item, Exception):
             raise item
         return item
 
+    async def get(self, *, model):
+        self.checked.append(model)
+        if model in self.missing:
+            raise genai_errors.ClientError(404, {"error": {"code": 404, "message": "not found", "status": "NOT_FOUND"}})
+        return types.Model(name=f"models/{model}")
 
-class FakeAnthropic:
-    def __init__(self, *responses) -> None:
-        self.messages = FakeMessages(responses)
+
+class FakeGenAI:
+    def __init__(self, *responses, missing=()) -> None:
+        self.models = FakeAsyncModels(responses, missing)
+        self.closed = False
+        self.aio = SimpleNamespace(models=self.models, aclose=self._aclose)
+
+    async def _aclose(self) -> None:
+        self.closed = True

@@ -8,7 +8,7 @@ import os
 import re
 import tomllib
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import time
 from pathlib import Path
 from typing import Any
@@ -45,11 +45,16 @@ class StorageSettings:
 
 
 @dataclass(frozen=True, slots=True)
-class ModelSettings:
+class LLMSettings:
+    """모델 호출 설정. 제공사 어댑터는 app/llm/에 있다."""
+
+    provider: str = "gemini"
     # 대화·판단
-    chat: str = "claude-sonnet-5"
-    # 알림·브리핑 문장 다듬기, 대화 요약
-    light: str = "claude-haiku-4-5"
+    chat_model: str = "gemini-3.5-flash-lite"
+    # 브리핑 문장 다듬기, 대화 요약
+    light_model: str = "gemini-3.5-flash-lite"
+    # 제공사별 설정 (config.toml의 [llm.<provider>] 표)
+    options: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,7 +76,7 @@ class Settings:
     telegram: TelegramSettings
     notification: NotificationSettings
     storage: StorageSettings
-    models: ModelSettings = ModelSettings()
+    llm: LLMSettings = field(default_factory=LLMSettings)
     conversation: ConversationSettings = ConversationSettings()
     briefing: BriefingSettings = BriefingSettings()
 
@@ -125,10 +130,11 @@ def load_settings(
         telegram = data["telegram"]
         notification = data.get("notification", {})
         storage = data["storage"]
-        models = data.get("models", {})
+        llm = data.get("llm", {})
         conversation = data.get("conversation", {})
         briefing = data.get("briefing", {})
-        n_default, m_default = NotificationSettings(), ModelSettings()
+        n_default, l_default = NotificationSettings(), LLMSettings()
+        provider = llm.get("provider", l_default.provider)
         c_default, b_default = ConversationSettings(), BriefingSettings()
         return Settings(
             telegram=TelegramSettings(
@@ -146,9 +152,11 @@ def load_settings(
                 profile_path=path(storage.get("profile_path", "data/profile.md")),
                 system_prompt_path=path(storage.get("system_prompt_path", "prompts/system_prompt.md")),
             ),
-            models=ModelSettings(
-                chat=models.get("chat", m_default.chat),
-                light=models.get("light", m_default.light),
+            llm=LLMSettings(
+                provider=provider,
+                chat_model=llm.get("chat_model", l_default.chat_model),
+                light_model=llm.get("light_model", l_default.light_model),
+                options=dict(llm.get(provider, {})),
             ),
             conversation=ConversationSettings(
                 idle_compact_minutes=int(conversation.get("idle_compact_minutes", c_default.idle_compact_minutes)),

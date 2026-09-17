@@ -5,7 +5,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
-import anthropic
 from telegram import Update
 from telegram.constants import ChatAction
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
@@ -14,6 +13,7 @@ from app.agent.loop import Assistant
 from app.channels.telegram import TelegramNotifier
 from app.core.clock import utc_now
 from app.core.interfaces import Button, OutgoingMessage
+from app.llm import TransientLLMError
 from app.storage.conversation import ConversationStore, PendingAction
 from app.tools.registry import ToolRegistry
 
@@ -24,8 +24,6 @@ CONFIRM, CANCEL = "confirm", "cancel"
 FALLBACK_REPLY = "지금은 답변을 만들 수 없습니다. 잠시 후 다시 말씀해 주세요."
 ALREADY_HANDLED = "이미 처리된 요청입니다."
 GREETING = "사용자님, 비서가 준비되었습니다. 할 일이나 리마인더를 편하게 말씀해 주세요."
-# 일시적인 API 장애는 스택 추적 없이 한 줄만 남긴다
-_TRANSIENT_ERRORS = (anthropic.APIConnectionError, anthropic.RateLimitError, anthropic.InternalServerError)
 
 
 @dataclass(slots=True)
@@ -92,7 +90,9 @@ class ChatHandlers:
         try:
             reply = await services.assistant.reply(update.effective_message.text, services.clock())
         except Exception as exc:
-            logger.error("답변 생성 실패: %s", type(exc).__name__, exc_info=not isinstance(exc, _TRANSIENT_ERRORS))
+            # 일시적인 모델 장애는 스택 추적 없이 한 줄만 남긴다
+            transient = isinstance(exc, TransientLLMError)
+            logger.error("답변 생성 실패: %s %s", type(exc).__name__, exc if transient else "", exc_info=not transient)
             await notifier.send(OutgoingMessage(FALLBACK_REPLY))
             return
         await notifier.send(OutgoingMessage(reply.text))

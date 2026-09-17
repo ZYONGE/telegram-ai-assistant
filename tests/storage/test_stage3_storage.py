@@ -4,7 +4,6 @@ import pytest
 
 from app.core.events import EventKind
 from app.core.interfaces import GateAction, GateDecision
-from app.storage.conversation import INTERRUPTED_RESULT
 from app.storage.tasks import ACTIVE, CANCELLED, PAUSED
 from tests.conftest import kst, make_event
 
@@ -52,31 +51,40 @@ async def test_task_requires_exactly_one_schedule(task_repo):
 
 async def test_conversation_append_archive_and_summary(conversation):
     now = kst(9, 17, 14)
-    await conversation.append("user", [{"type": "text", "text": "안녕"}], now)
-    await conversation.append("assistant", [{"type": "text", "text": "네, 사용자님"}], now + timedelta(minutes=1))
+    user_turn = {"role": "user", "parts": [{"text": "안녕"}]}
+    await conversation.append("user", user_turn, now)
+    await conversation.append("assistant", {"role": "model", "parts": [{"text": "네"}]}, now + timedelta(minutes=1))
 
-    messages = await conversation.active_messages(now)
+    messages = await conversation.active_messages()
     assert [m.role for m in messages] == ["user", "assistant"]
+    assert messages[0].content == user_turn
     assert await conversation.last_activity() == now + timedelta(minutes=1)
     assert await conversation.count_active() == 2
 
     await conversation.archive_with_summary(messages[-1].id, "- 인사함", now)
-    assert await conversation.active_messages(now) == []
+    assert await conversation.active_messages() == []
     assert await conversation.summary() == "- 인사함"
     assert await conversation.last_activity() is None
 
 
-async def test_dangling_tool_use_gets_error_result(conversation):
-    now = kst(9, 17, 14)
-    await conversation.append("user", [{"type": "text", "text": "할 일 추가"}], now)
-    await conversation.append(
-        "assistant", [{"type": "tool_use", "id": "tu1", "name": "add_todo", "input": {}}], now
+async def test_migration_archives_conversations_from_previous_provider(tmp_path):
+    from app.storage.db import MIGRATIONS, Database
+
+    path = tmp_path / "old.db"
+    db = await Database.open(path)
+    await db.conn.execute("PRAGMA user_version = 2")
+    await db.conn.execute(
+        "INSERT INTO conversation_messages (role, content, created_at) VALUES ('user', '[]', '2026-09-17T00:00:00.000000+00:00')"
     )
-    messages = await conversation.active_messages(now)
-    assert messages[-1].role == "user"
-    assert messages[-1].content == [
-        {"type": "tool_result", "tool_use_id": "tu1", "content": INTERRUPTED_RESULT, "is_error": True}
-    ]
+    await db.conn.commit()
+    await db.close()
+
+    reopened = await Database.open(path)
+    assert await reopened.schema_version() == len(MIGRATIONS)
+    from app.storage.conversation import ConversationStore
+
+    assert await ConversationStore(reopened).active_messages() == []
+    await reopened.close()
 
 
 async def test_notes_are_consumed_once(conversation):

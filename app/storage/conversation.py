@@ -2,6 +2,7 @@
 
 기록은 추가만 한다. 압축할 때는 지금까지의 기록 전체를 보관(archived) 처리하고
 요약을 남겨, 다음 대화는 요약을 시스템 프롬프트에 담은 새 대화로 시작한다.
+content에는 모델 제공자 형식의 턴을 그대로 저장한다 (app/agent/model.py).
 """
 
 import json
@@ -12,14 +13,13 @@ from typing import Any
 
 from app.storage.db import Database, from_db_time, to_db_time
 
-INTERRUPTED_RESULT = "이 도구 실행은 중단되어 결과가 없습니다."
-
 
 @dataclass(frozen=True, slots=True)
 class StoredMessage:
     id: int
+    # 'user' 또는 'assistant'
     role: str
-    content: list[dict[str, Any]]
+    content: dict[str, Any]
     created_at: datetime
 
 
@@ -36,26 +36,23 @@ class ConversationStore:
     def __init__(self, db: Database) -> None:
         self._conn = db.conn
 
-    async def append(self, role: str, content: list[dict[str, Any]], now: datetime) -> None:
+    async def append(self, role: str, content: dict[str, Any], now: datetime) -> None:
         await self._conn.execute(
             "INSERT INTO conversation_messages (role, content, created_at) VALUES (?, ?, ?)",
             (role, json.dumps(content, ensure_ascii=False), to_db_time(now)),
         )
         await self._conn.commit()
 
-    async def active_messages(self, now: datetime) -> list[StoredMessage]:
-        """보관되지 않은 대화. 마지막 도구 호출에 결과가 없으면(중단된 경우) 오류 결과를 채워 넣는다."""
-        messages = await self._active()
-        if messages and messages[-1].role == "assistant":
-            dangling = [b["id"] for b in messages[-1].content if b.get("type") == "tool_use"]
-            if dangling:
-                results = [
-                    {"type": "tool_result", "tool_use_id": tool_id, "content": INTERRUPTED_RESULT, "is_error": True}
-                    for tool_id in dangling
-                ]
-                await self.append("user", results, now)
-                messages = await self._active()
-        return messages
+    async def active_messages(self) -> list[StoredMessage]:
+        """보관되지 않은 대화."""
+        async with self._conn.execute(
+            "SELECT * FROM conversation_messages WHERE archived = 0 ORDER BY id"
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return [
+            StoredMessage(row["id"], row["role"], json.loads(row["content"]), from_db_time(row["created_at"]))
+            for row in rows
+        ]
 
     async def last_activity(self) -> datetime | None:
         async with self._conn.execute(
@@ -105,16 +102,6 @@ class ConversationStore:
             )
             await self._conn.commit()
         return [row["text"] for row in rows]
-
-    async def _active(self) -> list[StoredMessage]:
-        async with self._conn.execute(
-            "SELECT * FROM conversation_messages WHERE archived = 0 ORDER BY id"
-        ) as cursor:
-            rows = await cursor.fetchall()
-        return [
-            StoredMessage(row["id"], row["role"], json.loads(row["content"]), from_db_time(row["created_at"]))
-            for row in rows
-        ]
 
 
 class PendingActionStore:

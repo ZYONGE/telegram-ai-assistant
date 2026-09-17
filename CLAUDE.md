@@ -37,7 +37,8 @@
 | 언어 | Python 3.14 (`.python-version`), asyncio로 통일 |
 | 패키지 관리 | uv. `uv.lock`으로 윈도우·맥·arm64 서버에서 같은 버전 사용 |
 | 메신저 | `python-telegram-bot`, **폴링 방식** (웹훅 사용 안 함) |
-| 모델 | Anthropic Python SDK. 대화·판단은 Sonnet급, 알림 문장 다듬기는 Haiku급. 모델 이름은 설정 파일에서 관리 |
+| 모델 | Gemini (`google-genai`). 기본 `gemini-3.5-flash-lite`(대화·가벼운 작업 공통). 모델 이름과 제공사는 `config.toml`의 `[llm]`에서 관리. 모델 호출은 `app/llm/`에만 둔다 (`docs/adr/0004`) |
+| 모델 호출 경로 | Cloud 결제 계정을 연결한 Google Cloud 프로젝트로 호출한다 (B안, 무료 티어 데이터 학습 사용 회피). 기본은 그 프로젝트의 Gemini API 키, 선택으로 Vertex AI |
 | 저장소 | 구조화 데이터는 SQLite, 장기 기억만 마크다운 파일 |
 | 스케줄러 | APScheduler + SQLite 작업 저장 (재시작 후에도 예약 유지). 작업 원본은 `scheduled_tasks` 표, APScheduler는 메모리에서 시각만 계산 (`docs/adr/0002`) |
 | 외부 연동 | Google Calendar API, Gmail API(`gmail.modify`), 기상청 단기예보 API, 웹 검색 API |
@@ -58,6 +59,7 @@ assistant/
 │  ├─ core/          # 공통 뼈대 (Event, 인터페이스, 설정)
 │  ├─ channels/      # 텔레그램 입출력
 │  ├─ agent/         # 에이전트 루프, 프롬프트 조립, 기억
+│  ├─ llm/           # 모델 호출 (제공사 어댑터). 제공사 SDK는 이 안에서만 쓴다
 │  ├─ tools/         # 모델이 쓰는 도구 (일정, 할 일, 메일, 날씨 등)
 │  ├─ scheduler/     # 예약 작업, 브리핑, 알림 게이트
 │  ├─ collectors/    # 외부 수집기 (eClass, 학사일정, 공고) — 모델과 분리
@@ -224,12 +226,13 @@ assistant/
 - 0단계 완료 (2026-09-17): 원격 저장소 연결(github.com/ZYONGE/telegram-ai-assistant), `refs/` 클론, `docs/refs/` 메모 4개, `data/profile.md` 양식
 - 1단계 완료 (2026-09-17): `app/` 패키지 구조, `app/core` 인터페이스 확정
 - 2단계 (2026-09-17): 설정(`config.toml` + `.env`), SQLite(할 일·알림 기록), 알림 게이트, 발송기, 수집 입구, 텔레그램 발송, 가짜 수집기, 1회 실행(`python -m app.main`). 테스트 81개 통과
-- 3단계 (2026-09-18): 대화 루프(Sonnet, 도구 13개, 확인 버튼), 기억(`data/memory.md`)·프로필 주입, 유휴 요약 압축(Haiku), 리마인더·예약 작업, 아침·저녁 브리핑, 텔레그램 수신(허용 ID만), 상시 실행 진입점. 테스트 177개 통과. ADR 0001~0003 작성. 2단계 테스트 데이터 정리 완료
-- 다음 작업: 사용자님이 `.env`에 `ANTHROPIC_API_KEY`를 넣고 실사용 확인 → 4단계 계획
+- 3단계 (2026-09-18): 대화 루프(도구 13개, 확인 버튼), 기억(`data/memory.md`)·프로필 주입, 유휴 요약 압축, 리마인더·예약 작업, 아침·저녁 브리핑, 텔레그램 수신(허용 ID만), 상시 실행 진입점. ADR 0001~0003 작성. 2단계 테스트 데이터 정리 완료
+- 설계 변경 (2026-09-18, 사용자님 결정): 모델을 Claude → Gemini(`gemini-3.5-flash-lite`)로 바꾸고, 결제 연결 Google Cloud 프로젝트로 호출(B안), 모델 호출을 `app/llm/`로 모아 설정에서 제공사 교체. ADR 0004. 테스트 201개 통과
+- 다음 작업: 사용자님이 결제 연결 프로젝트의 `GEMINI_API_KEY`를 `.env`에 넣고 `[llm.gemini] billing_enabled = true`로 바꾼 뒤 실사용 확인 → 4단계 계획
 - 실행: `py -3.14 -m uv run python -m app.main` (Ctrl+C로 종료)
 - 나중에 처리할 것
   - `collector_failed`의 ref_id가 원인별로 고정이라 같은 원인의 실패는 한 번만 알린다. 8단계(수집 실패 알림)에서 재알림 주기를 정한다
-  - 알림 문장은 아직 모델 없이 만든다. 3단계에서 Haiku로 다듬는다
+  - google-genai가 Python 3.17에서 제거될 문법을 쓴다는 경고가 난다 (현재 동작 영향 없음). SDK 업데이트 시 확인
 - 환경 메모
   - Python 3.14.7(`C:\Python314`) 사용. 이 PC는 `AppData\Roaming` 아래 junction 실행이 막혀 있어 uv 관리형 Python을 쓰지 않는다 (`%APPDATA%\uv\uv.toml`: `python-downloads = "manual"`)
   - uv는 PATH에 없다. `py -3.14 -m uv ...`로 실행한다

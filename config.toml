@@ -1,13 +1,25 @@
 # 비밀값은 여기에 직접 쓰지 않는다. .env에 두고 ${이름}으로 참조한다.
-# Anthropic API 키는 SDK가 환경변수 ANTHROPIC_API_KEY(.env)에서 직접 읽는다.
 
 [telegram]
 bot_token = "${TELEGRAM_BOT_TOKEN}"
 allowed_user_id = "${TELEGRAM_ALLOWED_USER_ID}"
 
-[models]
-chat = "claude-sonnet-5"
-light = "claude-haiku-4-5"
+# 모델 호출 (app/llm). provider를 바꾸면 제공사가 바뀐다. 현재 구현: gemini
+[llm]
+provider = "gemini"
+chat_model = "gemini-3.5-flash-lite"
+light_model = "gemini-3.5-flash-lite"
+
+# Gemini 모델 ID 목록: https://ai.google.dev/gemini-api/docs/models
+[llm.gemini]
+# api_key: Cloud 결제 계정을 연결한 Google Cloud 프로젝트의 Gemini API 키 (.env의 GEMINI_API_KEY)
+# vertex : 같은 프로젝트의 Vertex AI (.env의 GOOGLE_APPLICATION_CREDENTIALS, 아래 project 필요)
+backend = "api_key"
+# 무료 티어는 입력 내용이 제품 개선에 쓰일 수 있다. 프로젝트에 결제 계정을 연결한 뒤 true로 바꾼다.
+billing_enabled = false
+# vertex일 때만 사용
+project = ""
+location = "global"
 
 [notification]
 quiet_start = "23:00"

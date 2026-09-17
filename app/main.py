@@ -7,7 +7,6 @@ import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
-import anthropic
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
@@ -24,6 +23,7 @@ from app.channels.telegram_bot import SERVICES_KEY, ChatHandlers, ChatServices
 from app.core.clock import KST, utc_now
 from app.core.config import ConfigError, Settings, load_settings
 from app.core.interfaces import BriefingKind
+from app.llm import LLM, create_llm
 from app.scheduler.briefing import BriefingService, NewsBriefing, TaskBriefing, TodoBriefing
 from app.scheduler.dispatcher import Dispatcher
 from app.scheduler.gate import RuleBasedGate
@@ -45,17 +45,20 @@ logger = logging.getLogger("app")
 class Runtime:
     db: Database
     scheduler: AsyncIOScheduler
-    client: anthropic.AsyncAnthropic
+    llm: LLM
     services: ChatServices
 
     async def close(self) -> None:
         if self.scheduler.running:
             self.scheduler.shutdown(wait=False)
-        await self.client.close()
+        await self.llm.close()
         await self.db.close()
 
 
-async def create_runtime(settings: Settings, bot: Bot) -> Runtime:
+async def create_runtime(settings: Settings, bot: Bot, llm: LLM | None = None) -> Runtime:
+    # 모델 제공사는 config.toml의 [llm] provider로 고른다. 인증·모델 ID는 여기서 먼저 확인된다.
+    llm = llm or await create_llm(settings.llm)
+
     db = await Database.open(settings.storage.db_path)
     log = NotificationLog(db)
     todos = TodoRepository(db)
@@ -70,11 +73,9 @@ async def create_runtime(settings: Settings, bot: Bot) -> Runtime:
     memory = MarkdownMemoryStore(settings.storage.memory_path)
     registry.register(*todo_tools(todos), *memory_tools(memory), *task_tools(tasks))
 
-    # API 키는 SDK가 환경변수 ANTHROPIC_API_KEY에서 읽는다 (.env는 load_settings가 불러 둠)
-    client = anthropic.AsyncAnthropic()
-    light = LightModel(client, settings.models.light)
+    light = LightModel(llm.light)
     prompt = PromptBuilder(settings.storage.system_prompt_path, settings.storage.profile_path, memory)
-    assistant = Assistant(client, settings.models.chat, settings.conversation, prompt, conversation, registry, light)
+    assistant = Assistant(llm.chat, settings.conversation, prompt, conversation, registry, light)
     tasks.set_agent_runner(assistant.run_task)
 
     briefing = BriefingService([TodoBriefing(todos), TaskBriefing(tasks), NewsBriefing(log)], dispatcher, light)
@@ -83,7 +84,7 @@ async def create_runtime(settings: Settings, bot: Bot) -> Runtime:
     scheduler.start()
     logger.info("예약 작업 %d건 복원, 스케줄러 시작", restored)
 
-    return Runtime(db, scheduler, client, ChatServices(assistant, registry, conversation))
+    return Runtime(db, scheduler, llm, ChatServices(assistant, registry, conversation))
 
 
 def _add_system_jobs(
@@ -142,7 +143,7 @@ def build_application(settings: Settings) -> Application:
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     # 토큰이 들어간 요청 URL이 로그에 남지 않게 한다
-    for noisy in ("httpx", "httpx2", "telegram.ext", "apscheduler"):
+    for noisy in ("httpx", "google_genai", "telegram.ext", "apscheduler"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
     try:
         application = build_application(load_settings())
