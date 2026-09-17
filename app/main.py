@@ -7,11 +7,12 @@ import asyncio
 import logging
 
 from telegram import Bot
+from telegram.error import InvalidToken
 
 from app.channels.telegram import TelegramNotifier
 from app.collectors.fake import FakeCollector, sample_events
 from app.core.clock import utc_now
-from app.core.config import Settings, load_settings
+from app.core.config import ConfigError, Settings, load_settings
 from app.scheduler.dispatcher import Dispatcher
 from app.scheduler.gate import RuleBasedGate
 from app.scheduler.ingest import Ingestor
@@ -45,7 +46,15 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     # 토큰이 들어간 요청 URL이 로그에 남지 않게 한다
     logging.getLogger("httpx").setLevel(logging.WARNING)
-    asyncio.run(run_once(load_settings()))
+    try:
+        asyncio.run(run_once(load_settings()))
+    except ConfigError as exc:
+        logger.error("설정 오류: %s", exc)
+        raise SystemExit(1) from None
+    except InvalidToken:
+        # 이 예외의 메시지에는 토큰 원문이 들어 있어서 그대로 출력하지 않는다
+        logger.error("텔레그램이 봇 토큰을 거부했습니다. .env의 TELEGRAM_BOT_TOKEN을 확인하세요.")
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":
