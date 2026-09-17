@@ -41,6 +41,66 @@ MIGRATIONS: list[str] = [
     );
     CREATE INDEX idx_notifications_pending ON notifications (action, sent_at, release_at);
     """,
+    """
+    -- 브리핑에 포함된 시각. batch 결정을 받은 소식은 다음 브리핑에 한 번만 들어간다.
+    ALTER TABLE notifications ADD COLUMN briefed_at TEXT;
+
+    -- 대화로 등록한 리마인더·예약 작업. 실행 시각 계산은 APScheduler가 하고, 이 표가 원본이다.
+    CREATE TABLE scheduled_tasks (
+        id          TEXT PRIMARY KEY,
+        kind        TEXT NOT NULL CHECK (kind IN ('reminder', 'agent')),
+        content     TEXT NOT NULL,
+        run_at      TEXT,
+        cron        TEXT,
+        status      TEXT NOT NULL CHECK (status IN ('active', 'paused', 'completed', 'cancelled')),
+        fail_count  INTEGER NOT NULL DEFAULT 0,
+        last_run_at TEXT,
+        created_at  TEXT NOT NULL,
+        CHECK ((run_at IS NULL) <> (cron IS NULL))
+    );
+
+    CREATE TABLE task_runs (
+        id       INTEGER PRIMARY KEY,
+        task_id  TEXT NOT NULL REFERENCES scheduled_tasks (id),
+        ran_at   TEXT NOT NULL,
+        ok       INTEGER NOT NULL,
+        detail   TEXT NOT NULL
+    );
+
+    -- 대화 기록. content는 API 메시지 content 블록 목록(JSON)이다.
+    CREATE TABLE conversation_messages (
+        id          INTEGER PRIMARY KEY,
+        role        TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+        content     TEXT NOT NULL,
+        created_at  TEXT NOT NULL,
+        archived    INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE conversation_state (
+        id                  INTEGER PRIMARY KEY CHECK (id = 1),
+        summary             TEXT NOT NULL DEFAULT '',
+        summary_updated_at  TEXT
+    );
+
+    -- 다음 사용자 메시지에 덧붙일 알림 (확인 버튼 처리 결과 등)
+    CREATE TABLE conversation_notes (
+        id          INTEGER PRIMARY KEY,
+        text        TEXT NOT NULL,
+        created_at  TEXT NOT NULL,
+        consumed    INTEGER NOT NULL DEFAULT 0
+    );
+
+    -- 확인 버튼을 기다리는 도구 호출
+    CREATE TABLE pending_actions (
+        id           TEXT PRIMARY KEY,
+        tool_name    TEXT NOT NULL,
+        args         TEXT NOT NULL,
+        summary      TEXT NOT NULL,
+        status       TEXT NOT NULL CHECK (status IN ('pending', 'done', 'cancelled')),
+        created_at   TEXT NOT NULL,
+        resolved_at  TEXT
+    );
+    """,
 ]
 
 

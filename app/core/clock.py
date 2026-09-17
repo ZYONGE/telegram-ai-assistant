@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 KST = ZoneInfo("Asia/Seoul")
+_WEEKDAYS = "월화수목금토일"
 
 
 def utc_now() -> datetime:
@@ -23,3 +24,9 @@ def to_utc(value: datetime) -> datetime:
 
 def to_kst(value: datetime) -> datetime:
     return require_aware(value, "value").astimezone(KST)
+
+
+def format_kst(value: datetime) -> str:
+    """사용자에게 보여 줄 시각. 예: 9월 18일(금) 23:59"""
+    local = to_kst(value)
+    return f"{local.month}월 {local.day}일({_WEEKDAYS[local.weekday()]}) {local:%H:%M}"

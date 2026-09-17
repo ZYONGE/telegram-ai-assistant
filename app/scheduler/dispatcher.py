@@ -3,14 +3,12 @@
 import logging
 from datetime import datetime
 
-from app.core.clock import to_kst
+from app.core.clock import format_kst
 from app.core.events import Event
 from app.core.interfaces import GateAction, GateDecision, NotificationGate, Notifier, OutgoingMessage
 from app.storage.notifications import NotificationLog
 
 logger = logging.getLogger(__name__)
-
-_WEEKDAYS = "월화수목금토일"
 
 
 class Dispatcher:
@@ -51,8 +49,3 @@ def render_event(event: Event) -> OutgoingMessage:
     if event.due_at is not None:
         lines.append(f"마감: {format_kst(event.due_at)}")
     return OutgoingMessage("\n".join(lines))
-
-
-def format_kst(value: datetime) -> str:
-    local = to_kst(value)
-    return f"{local.month}월 {local.day}일({_WEEKDAYS[local.weekday()]}) {local:%H:%M}"

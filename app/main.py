@@ -1,53 +1,153 @@
-"""2단계 확인용 1회 실행: 가짜 수집기 → 할 일 등록 → 알림 게이트 → 텔레그램.
+"""비서 실행 진입점: 텔레그램 폴링 + 스케줄러.
 
 실행: py -3.14 -m uv run python -m app.main
 """
 
-import asyncio
 import logging
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 
+import anthropic
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 from telegram import Bot
 from telegram.error import InvalidToken
+from telegram.ext import Application, ApplicationBuilder
 
+from app.agent.light import LightModel
+from app.agent.loop import Assistant
+from app.agent.memory import MarkdownMemoryStore
+from app.agent.prompt import PromptBuilder
 from app.channels.telegram import TelegramNotifier
-from app.collectors.fake import FakeCollector, sample_events
-from app.core.clock import utc_now
+from app.channels.telegram_bot import SERVICES_KEY, ChatHandlers, ChatServices
+from app.core.clock import KST, utc_now
 from app.core.config import ConfigError, Settings, load_settings
+from app.core.interfaces import BriefingKind
+from app.scheduler.briefing import BriefingService, NewsBriefing, TaskBriefing, TodoBriefing
 from app.scheduler.dispatcher import Dispatcher
 from app.scheduler.gate import RuleBasedGate
-from app.scheduler.ingest import Ingestor
+from app.scheduler.tasks import TaskService
+from app.storage.conversation import ConversationStore, PendingActionStore
 from app.storage.db import Database
 from app.storage.notifications import NotificationLog
+from app.storage.tasks import TaskRepository
 from app.storage.todos import TodoRepository
+from app.tools.memory import memory_tools
+from app.tools.registry import ToolRegistry
+from app.tools.tasks import task_tools
+from app.tools.todos import todo_tools
 
 logger = logging.getLogger("app")
 
 
-async def run_once(settings: Settings) -> None:
-    now = utc_now()
+@dataclass(slots=True)
+class Runtime:
+    db: Database
+    scheduler: AsyncIOScheduler
+    client: anthropic.AsyncAnthropic
+    services: ChatServices
+
+    async def close(self) -> None:
+        if self.scheduler.running:
+            self.scheduler.shutdown(wait=False)
+        await self.client.close()
+        await self.db.close()
+
+
+async def create_runtime(settings: Settings, bot: Bot) -> Runtime:
     db = await Database.open(settings.storage.db_path)
-    try:
-        log = NotificationLog(db)
-        todos = TodoRepository(db)
-        async with Bot(settings.telegram.bot_token) as bot:
-            notifier = TelegramNotifier(bot, settings.telegram.allowed_user_id)
-            dispatcher = Dispatcher(RuleBasedGate(log, settings.notification), log, notifier)
-            released = await dispatcher.release_pending(now)
-            decisions = await Ingestor(todos, dispatcher).run_collector(FakeCollector(sample_events(now)), now)
-        logger.info("보류 해제 발송 %d건", released)
-        for decision in decisions:
-            logger.info("게이트 결정: %s (%s)", decision.action.value, decision.reason)
-        logger.info("열린 할 일 %d건", len(await todos.list_open()))
-    finally:
-        await db.close()
+    log = NotificationLog(db)
+    todos = TodoRepository(db)
+    conversation = ConversationStore(db)
+
+    notifier = TelegramNotifier(bot, settings.telegram.allowed_user_id)
+    dispatcher = Dispatcher(RuleBasedGate(log, settings.notification), log, notifier)
+    scheduler = AsyncIOScheduler(timezone=KST)
+    tasks = TaskService(TaskRepository(db), scheduler, dispatcher)
+
+    registry = ToolRegistry(PendingActionStore(db))
+    memory = MarkdownMemoryStore(settings.storage.memory_path)
+    registry.register(*todo_tools(todos), *memory_tools(memory), *task_tools(tasks))
+
+    # API 키는 SDK가 환경변수 ANTHROPIC_API_KEY에서 읽는다 (.env는 load_settings가 불러 둠)
+    client = anthropic.AsyncAnthropic()
+    light = LightModel(client, settings.models.light)
+    prompt = PromptBuilder(settings.storage.system_prompt_path, settings.storage.profile_path, memory)
+    assistant = Assistant(client, settings.models.chat, settings.conversation, prompt, conversation, registry, light)
+    tasks.set_agent_runner(assistant.run_task)
+
+    briefing = BriefingService([TodoBriefing(todos), TaskBriefing(tasks), NewsBriefing(log)], dispatcher, light)
+    _add_system_jobs(scheduler, settings, dispatcher, assistant, briefing)
+    restored = await tasks.start()
+    scheduler.start()
+    logger.info("예약 작업 %d건 복원, 스케줄러 시작", restored)
+
+    return Runtime(db, scheduler, client, ChatServices(assistant, registry, conversation))
+
+
+def _add_system_jobs(
+    scheduler: AsyncIOScheduler,
+    settings: Settings,
+    dispatcher: Dispatcher,
+    assistant: Assistant,
+    briefing: BriefingService,
+) -> None:
+    def safe(name: str, job: Callable[[], Awaitable[object]]) -> Callable[[], Awaitable[None]]:
+        async def run() -> None:
+            try:
+                await job()
+            except Exception:
+                logger.exception("시스템 작업 실패: %s", name)
+        return run
+
+    scheduler.add_job(
+        safe("보류 알림 발송", lambda: dispatcher.release_pending(utc_now())),
+        IntervalTrigger(minutes=1), id="system:release", coalesce=True, max_instances=1,
+    )
+    scheduler.add_job(
+        safe("대화 압축", lambda: assistant.compact_if_idle(utc_now())),
+        IntervalTrigger(minutes=5), id="system:compact", coalesce=True, max_instances=1,
+    )
+    for kind, at in ((BriefingKind.MORNING, settings.briefing.morning), (BriefingKind.EVENING, settings.briefing.evening)):
+        scheduler.add_job(
+            safe(f"{kind} 브리핑", lambda kind=kind: briefing.send(kind, utc_now())),
+            CronTrigger(hour=at.hour, minute=at.minute, timezone=KST),
+            id=f"system:briefing:{kind}", coalesce=True, max_instances=1, misfire_grace_time=1800,
+        )
+
+
+def build_application(settings: Settings) -> Application:
+    async def post_init(application: Application) -> None:
+        runtime = await create_runtime(settings, application.bot)
+        application.bot_data["runtime"] = runtime
+        application.bot_data[SERVICES_KEY] = runtime.services
+
+    async def post_shutdown(application: Application) -> None:
+        runtime: Runtime | None = application.bot_data.get("runtime")
+        if runtime is not None:
+            await runtime.close()
+
+    application = (
+        ApplicationBuilder()
+        .token(settings.telegram.bot_token)
+        .post_init(post_init)
+        .post_shutdown(post_shutdown)
+        .build()
+    )
+    ChatHandlers(settings.telegram.allowed_user_id).register(application)
+    return application
 
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     # 토큰이 들어간 요청 URL이 로그에 남지 않게 한다
-    logging.getLogger("httpx").setLevel(logging.WARNING)
+    for noisy in ("httpx", "httpx2", "telegram.ext", "apscheduler"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
     try:
-        asyncio.run(run_once(load_settings()))
+        application = build_application(load_settings())
+        logger.info("비서를 시작합니다. 종료하려면 Ctrl+C를 누르세요.")
+        application.run_polling(allowed_updates=["message", "callback_query"])
     except ConfigError as exc:
         logger.error("설정 오류: %s", exc)
         raise SystemExit(1) from None

@@ -5,7 +5,7 @@
    단, 보류 시각이 지났거나 즉시 발송에 실패한 이벤트는 다시 판단한다
 2. 조용한 시간(기본 23:00~06:30 KST) → hold, 조용한 시간이 끝나는 시각에 다시 판단
    사용자가 직접 요청한 알림은 예외
-3. 사용자가 요청한 알림 → send_now (일일 상한에 세지 않음)
+3. 사용자가 요청한 알림, 정해진 브리핑 → send_now (일일 상한에 세지 않음)
 4. 급한 이벤트 → send_now, 오늘 상한을 넘었으면 batch
 5. 나머지 → batch (다음 브리핑에 묶음)
 """
@@ -14,7 +14,7 @@ from datetime import UTC, datetime, time, timedelta
 
 from app.core.clock import KST, require_aware, to_kst
 from app.core.config import NotificationSettings
-from app.core.events import Event
+from app.core.events import Event, EventKind
 from app.core.interfaces import GateAction, GateDecision
 from app.storage.notifications import NotificationLog, NotificationRecord
 
@@ -35,6 +35,9 @@ class RuleBasedGate:
 
         if event.user_requested:
             return GateDecision(GateAction.SEND_NOW, "사용자가 요청한 알림")
+
+        if event.kind == EventKind.BRIEFING:
+            return GateDecision(GateAction.SEND_NOW, "정해진 브리핑")
 
         if event.urgent:
             sent_today = await self._log.count_sent_since(_start_of_kst_day(now))

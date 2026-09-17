@@ -1,13 +1,29 @@
 # 비밀값은 여기에 직접 쓰지 않는다. .env에 두고 ${이름}으로 참조한다.
+# Anthropic API 키는 SDK가 환경변수 ANTHROPIC_API_KEY(.env)에서 직접 읽는다.
 
 [telegram]
 bot_token = "${TELEGRAM_BOT_TOKEN}"
 allowed_user_id = "${TELEGRAM_ALLOWED_USER_ID}"
+
+[models]
+chat = "claude-sonnet-5"
+light = "claude-haiku-4-5"
 
 [notification]
 quiet_start = "23:00"
 quiet_end = "06:30"
 daily_limit = 5
 
+[briefing]
+morning = "07:00"
+evening = "22:00"
+
+[conversation]
+idle_compact_minutes = 30
+max_active_messages = 80
+
 [storage]
 db_path = "data/assistant.db"
+memory_path = "data/memory.md"
+profile_path = "data/profile.md"
+system_prompt_path = "prompts/system_prompt.md"

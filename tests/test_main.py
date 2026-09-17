@@ -7,16 +7,14 @@ from app.core.config import ConfigError
 SECRET = "123456:SECRET-TOKEN-VALUE"
 
 
-@pytest.fixture
-def no_settings(monkeypatch):
-    monkeypatch.setattr(app_main, "load_settings", lambda: object())
-
-
-def test_rejected_token_is_not_printed(monkeypatch, no_settings, capsys, caplog):
-    async def reject(settings):
+class RejectingApplication:
+    def run_polling(self, **kwargs):
         raise InvalidToken(f"The token `{SECRET}` was rejected by the server.")
 
-    monkeypatch.setattr(app_main, "run_once", reject)
+
+def test_rejected_token_is_not_printed(monkeypatch, capsys, caplog):
+    monkeypatch.setattr(app_main, "load_settings", lambda: object())
+    monkeypatch.setattr(app_main, "build_application", lambda settings: RejectingApplication())
 
     with pytest.raises(SystemExit) as exit_info:
         app_main.main()

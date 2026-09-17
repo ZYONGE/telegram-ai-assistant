@@ -31,6 +31,7 @@ class EventKind(StrEnum):
     MAIL = "mail"
     SCHEDULE_CONFLICT = "schedule_conflict"
     JOB_POSTING = "job_posting"
+    BRIEFING = "briefing"
     COLLECTOR_FAILED = "collector_failed"
 
 

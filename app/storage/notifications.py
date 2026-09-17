@@ -6,7 +6,7 @@ from datetime import datetime
 
 import aiosqlite
 
-from app.core.events import Event
+from app.core.events import Event, EventKind
 from app.core.interfaces import GateAction, GateDecision
 from app.storage.db import Database, from_db_time, to_db_time
 
@@ -69,13 +69,30 @@ class NotificationLog:
         await self._conn.commit()
 
     async def count_sent_since(self, since: datetime) -> int:
-        """일일 상한 계산용. 사용자가 요청한 알림은 세지 않는다."""
+        """일일 상한 계산용. 사용자가 요청한 알림과 브리핑은 세지 않는다."""
         async with self._conn.execute(
-            "SELECT COUNT(*) FROM notifications WHERE user_requested = 0 AND sent_at >= ?",
-            (to_db_time(since),),
+            "SELECT COUNT(*) FROM notifications WHERE user_requested = 0 AND kind <> ? AND sent_at >= ?",
+            (EventKind.BRIEFING.value, to_db_time(since)),
         ) as cursor:
             row = await cursor.fetchone()
         return int(row[0])
+
+    async def unbriefed_batch(self) -> list[NotificationRecord]:
+        """다음 브리핑에 넣을 소식 (batch 결정을 받았고 아직 브리핑에 들어가지 않은 것)."""
+        async with self._conn.execute(
+            "SELECT * FROM notifications WHERE action = 'batch' AND briefed_at IS NULL ORDER BY decided_at, ref_id"
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return [_to_record(row) for row in rows]
+
+    async def mark_briefed(self, ref_ids: list[str], at: datetime) -> None:
+        if not ref_ids:
+            return
+        await self._conn.executemany(
+            "UPDATE notifications SET briefed_at = ? WHERE ref_id = ?",
+            [(to_db_time(at), ref_id) for ref_id in ref_ids],
+        )
+        await self._conn.commit()
 
     async def pending_delivery(self, now: datetime) -> list[NotificationRecord]:
         """보류가 풀린 알림과, 즉시 발송하기로 했지만 아직 보내지 못한 알림."""

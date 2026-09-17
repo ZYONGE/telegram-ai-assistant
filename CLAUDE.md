@@ -39,7 +39,7 @@
 | 메신저 | `python-telegram-bot`, **폴링 방식** (웹훅 사용 안 함) |
 | 모델 | Anthropic Python SDK. 대화·판단은 Sonnet급, 알림 문장 다듬기는 Haiku급. 모델 이름은 설정 파일에서 관리 |
 | 저장소 | 구조화 데이터는 SQLite, 장기 기억만 마크다운 파일 |
-| 스케줄러 | APScheduler + SQLite 작업 저장 (재시작 후에도 예약 유지) |
+| 스케줄러 | APScheduler + SQLite 작업 저장 (재시작 후에도 예약 유지). 작업 원본은 `scheduled_tasks` 표, APScheduler는 메모리에서 시각만 계산 (`docs/adr/0002`) |
 | 외부 연동 | Google Calendar API, Gmail API(`gmail.modify`), 기상청 단기예보 API, 웹 검색 API |
 | eClass 수집 | Python Playwright(async) + BeautifulSoup |
 | 시간 | 저장은 UTC, 판단·표시는 `Asia/Seoul` |
@@ -105,6 +105,7 @@ assistant/
 - `NotificationGate`: 이벤트마다 `send_now` / `batch` / `hold` / `drop` 결정
 - `BriefingProvider`: 브리핑 항목 제공 / `Notifier`: 사용자에게 발송 / `Tool`·`ToolSpec`·`Confirmation`: 도구 레지스트리와 확인 단계 (1단계 추가, 2026-09-17 확정)
 - 코드: `app/core/events.py`, `app/core/interfaces.py`, `app/core/clock.py`
+- 확인 버튼 도구(`Confirmation.BUTTON`)는 선택적으로 `async describe(args) -> str`를 두어 확인 문구를 만든다 (Protocol 밖의 선택 기능)
 
 인터페이스를 바꿔야 하면 구현 전에 사용자에게 먼저 제안한다.
 
@@ -215,16 +216,17 @@ assistant/
 | 7 | 감시 기능: 인턴 지원 관리, 채용 공고 감시, 교환학생 공지 | 각 기능 테스트 통과 |
 | 8 | 운영: OCI 배포, 야간 백업, 수집 실패 알림, 로그 | 서버에서 24시간 동작 |
 
-`prompts/system_prompt.md`는 v0.1 초안이 있다. 3단계에서 6·7절의 확정 내용을 반영해 갱신한다.
+`prompts/system_prompt.md`는 v0.2(3단계)다. 기능이 늘 때마다 "할 수 있는 일"과 "실행과 확인" 절을 갱신한다.
 
 ## 10. 진행 상태
 
-- 현재 단계: **2 완료 (2026-09-18 실제 텔레그램 수신 확인), 3단계 계획 전**
+- 현재 단계: **3 (구현·테스트 완료, 사용자님 실사용 확인 대기)**
 - 0단계 완료 (2026-09-17): 원격 저장소 연결(github.com/ZYONGE/telegram-ai-assistant), `refs/` 클론, `docs/refs/` 메모 4개, `data/profile.md` 양식
 - 1단계 완료 (2026-09-17): `app/` 패키지 구조, `app/core` 인터페이스 확정
 - 2단계 (2026-09-17): 설정(`config.toml` + `.env`), SQLite(할 일·알림 기록), 알림 게이트, 발송기, 수집 입구, 텔레그램 발송, 가짜 수집기, 1회 실행(`python -m app.main`). 테스트 81개 통과
-- 다음 작업: 3단계(대화 루프, 기억, 할 일, 리마인더, 예약 작업, 아침·저녁 브리핑) 계획 제시
-- `data/assistant.db`에 2단계 확인용 테스트 데이터(`fake:` ref_id 할 일·알림)가 있다. 3단계 실사용 전에 정리한다
+- 3단계 (2026-09-18): 대화 루프(Sonnet, 도구 13개, 확인 버튼), 기억(`data/memory.md`)·프로필 주입, 유휴 요약 압축(Haiku), 리마인더·예약 작업, 아침·저녁 브리핑, 텔레그램 수신(허용 ID만), 상시 실행 진입점. 테스트 177개 통과. ADR 0001~0003 작성. 2단계 테스트 데이터 정리 완료
+- 다음 작업: 사용자님이 `.env`에 `ANTHROPIC_API_KEY`를 넣고 실사용 확인 → 4단계 계획
+- 실행: `py -3.14 -m uv run python -m app.main` (Ctrl+C로 종료)
 - 나중에 처리할 것
   - `collector_failed`의 ref_id가 원인별로 고정이라 같은 원인의 실패는 한 번만 알린다. 8단계(수집 실패 알림)에서 재알림 주기를 정한다
   - 알림 문장은 아직 모델 없이 만든다. 3단계에서 Haiku로 다듬는다

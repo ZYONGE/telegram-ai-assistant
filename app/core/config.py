@@ -39,6 +39,31 @@ class NotificationSettings:
 @dataclass(frozen=True, slots=True)
 class StorageSettings:
     db_path: Path
+    memory_path: Path
+    profile_path: Path
+    system_prompt_path: Path
+
+
+@dataclass(frozen=True, slots=True)
+class ModelSettings:
+    # 대화·판단
+    chat: str = "claude-sonnet-5"
+    # 알림·브리핑 문장 다듬기, 대화 요약
+    light: str = "claude-haiku-4-5"
+
+
+@dataclass(frozen=True, slots=True)
+class ConversationSettings:
+    # 마지막 대화 후 이 시간이 지나면 대화를 요약해 압축한다
+    idle_compact_minutes: int = 30
+    # 요약 전 대화가 이보다 길어지면 다음 메시지 전에 압축한다
+    max_active_messages: int = 80
+
+
+@dataclass(frozen=True, slots=True)
+class BriefingSettings:
+    morning: time = time(7, 0)
+    evening: time = time(22, 0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +71,9 @@ class Settings:
     telegram: TelegramSettings
     notification: NotificationSettings
     storage: StorageSettings
+    models: ModelSettings = ModelSettings()
+    conversation: ConversationSettings = ConversationSettings()
+    briefing: BriefingSettings = BriefingSettings()
 
 
 def resolve_env_refs(data: Any, env: Mapping[str, str]) -> Any:
@@ -87,24 +115,53 @@ def load_settings(
         raise ConfigError(f"설정 파일이 없습니다: {config_path}") from exc
 
     data = resolve_env_refs(raw, env)
+    base = config_path.parent
+
+    def path(value: str) -> Path:
+        candidate = Path(value)
+        return candidate if candidate.is_absolute() else base / candidate
+
     try:
         telegram = data["telegram"]
         notification = data.get("notification", {})
-        db_path = Path(data["storage"]["db_path"])
-        defaults = NotificationSettings()
+        storage = data["storage"]
+        models = data.get("models", {})
+        conversation = data.get("conversation", {})
+        briefing = data.get("briefing", {})
+        n_default, m_default = NotificationSettings(), ModelSettings()
+        c_default, b_default = ConversationSettings(), BriefingSettings()
         return Settings(
             telegram=TelegramSettings(
                 bot_token=telegram["bot_token"],
                 allowed_user_id=int(telegram["allowed_user_id"]),
             ),
             notification=NotificationSettings(
-                quiet_start=time.fromisoformat(notification.get("quiet_start", defaults.quiet_start.isoformat())),
-                quiet_end=time.fromisoformat(notification.get("quiet_end", defaults.quiet_end.isoformat())),
-                daily_limit=int(notification.get("daily_limit", defaults.daily_limit)),
+                quiet_start=_time(notification, "quiet_start", n_default.quiet_start),
+                quiet_end=_time(notification, "quiet_end", n_default.quiet_end),
+                daily_limit=int(notification.get("daily_limit", n_default.daily_limit)),
             ),
             storage=StorageSettings(
-                db_path=db_path if db_path.is_absolute() else config_path.parent / db_path,
+                db_path=path(storage["db_path"]),
+                memory_path=path(storage.get("memory_path", "data/memory.md")),
+                profile_path=path(storage.get("profile_path", "data/profile.md")),
+                system_prompt_path=path(storage.get("system_prompt_path", "prompts/system_prompt.md")),
+            ),
+            models=ModelSettings(
+                chat=models.get("chat", m_default.chat),
+                light=models.get("light", m_default.light),
+            ),
+            conversation=ConversationSettings(
+                idle_compact_minutes=int(conversation.get("idle_compact_minutes", c_default.idle_compact_minutes)),
+                max_active_messages=int(conversation.get("max_active_messages", c_default.max_active_messages)),
+            ),
+            briefing=BriefingSettings(
+                morning=_time(briefing, "morning", b_default.morning),
+                evening=_time(briefing, "evening", b_default.evening),
             ),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise ConfigError(f"설정 형식이 잘못되었습니다: {exc!r}") from exc
+
+
+def _time(section: Mapping[str, Any], key: str, default: time) -> time:
+    return time.fromisoformat(section[key]) if key in section else default
