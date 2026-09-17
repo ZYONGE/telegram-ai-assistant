@@ -5,12 +5,11 @@
 | 저장소 | github.com/pinion05/eclass-cli |
 | 분석 커밋 | `e966b46` (2026-04-07) |
 | 언어 | TypeScript, Playwright, cheerio, zod |
-| 라이선스 | **미확정.** `package.json`과 README에는 MIT로 적혀 있지만 LICENSE 파일이 없고 저작권자 표기도 없음 |
+| 라이선스 | MIT (2026-09-17 사용자 확인). `package.json`과 README에 MIT 표기, LICENSE 파일은 없음 |
 | 적용 위치 | `app/collectors/eclass` |
 | 참고 범위 | SSO 로그인 흐름, 수강과목·할 일(과제) 목록 파싱, 계층 구조 |
 
-> 라이선스가 확인되기 전까지 코드는 한 줄도 옮기지 않는다. 아래 내용은 흐름과 관찰 사실만 정리한 것이다.
-> 코드를 옮길 일이 생기면 작성자에게 LICENSE 파일 추가를 요청한 뒤 판단한다.
+> 코드를 옮기거나 Python으로 번역해 가져오면 `THIRD_PARTY_NOTICES.md`에 출처와 MIT 전문을 기록한다.
 
 ## 풀고 있는 문제
 

@@ -11,9 +11,6 @@ from typing import Any
 
 from app.core.clock import require_aware
 
-# 사용자가 직접 그 시각으로 요청한 알림이면 True. 조용한 시간 예외 판단에 쓴다.
-META_USER_REQUESTED = "user_requested"
-
 
 class EventSource(StrEnum):
     ECLASS = "eclass"
@@ -45,6 +42,8 @@ class Event:
     ref_id: str
     body: str = ""
     urgent: bool = False
+    # 사용자가 직접 그 시각으로 요청한 알림. 조용한 시간과 일일 상한의 예외가 된다.
+    user_requested: bool = False
     due_at: datetime | None = None
     meta: dict[str, Any] = field(default_factory=dict)
 
@@ -54,10 +53,6 @@ class Event:
                 raise ValueError(f"Event.{name}은 비어 있을 수 없습니다")
         if self.due_at is not None:
             require_aware(self.due_at, "Event.due_at")
-
-    @property
-    def user_requested(self) -> bool:
-        return bool(self.meta.get(META_USER_REQUESTED, False))
 
 
 def collector_failed(source: str, reason: str, detail: str = "") -> Event:

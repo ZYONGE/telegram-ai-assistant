@@ -5,6 +5,9 @@ description = "사용자 개인용 텔레그램 AI 비서"
 license = "MIT"
 requires-python = ">=3.14"
 dependencies = [
+    "aiosqlite>=0.22.1",
+    "python-dotenv>=1.2.3",
+    "python-telegram-bot>=22.8",
     # Windows에는 시스템 시간대 DB가 없어서 zoneinfo가 이 패키지를 사용한다
     "tzdata",
 ]

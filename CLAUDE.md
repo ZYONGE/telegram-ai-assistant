@@ -98,12 +98,12 @@ assistant/
 
 모든 기능은 **이벤트**를 중심으로 합친다. 레퍼런스는 아래 인터페이스의 구현체로만 들어온다.
 
-- `Event`: source, kind, title, body, urgent, due_at, ref_id(중복 방지), meta
+- `Event`: source, kind, title, body, urgent, user_requested(조용한 시간·일일 상한 예외), due_at, ref_id(중복 방지), meta
 - `Collector`: `collect() -> list[Event]`
 - `Rule`: 메일 매칭 여부와 후속 동작 목록 반환
 - `MemoryStore`: 기억 읽기·추가·삭제
 - `NotificationGate`: 이벤트마다 `send_now` / `batch` / `hold` / `drop` 결정
-- 1단계에서 4-1절 접점을 위해 추가 (사용자 확정 대기): `BriefingProvider`(브리핑 항목 제공), `Notifier`(사용자에게 발송), `Tool`·`ToolSpec`·`Confirmation`(도구 레지스트리와 확인 단계)
+- `BriefingProvider`: 브리핑 항목 제공 / `Notifier`: 사용자에게 발송 / `Tool`·`ToolSpec`·`Confirmation`: 도구 레지스트리와 확인 단계 (1단계 추가, 2026-09-17 확정)
 - 코드: `app/core/events.py`, `app/core/interfaces.py`, `app/core/clock.py`
 
 인터페이스를 바꿔야 하면 구현 전에 사용자에게 먼저 제안한다.
@@ -195,7 +195,7 @@ assistant/
 - 레퍼런스 메모 양식: 풀고 있는 문제 / 핵심 아이디어 / 데이터 구조 / 인터페이스 / 가져올 것 / 버릴 것
 - 빌려온 설계마다 `docs/adr/`에 결정 기록을 남긴다. **원본과 다르게 한 점**을 반드시 적는다.
 - 코드를 실제로 옮긴 경우에만 `THIRD_PARTY_NOTICES.md`에 출처와 라이선스를 기록한다.
-- **eclass-cli 주의**: README에는 MIT로 적혀 있으나 LICENSE 파일이 확인되지 않았다. 라이선스를 확인하기 전까지는 코드를 옮기지 말고 흐름만 참고해 직접 작성한다. (2026-09-17 확인: `package.json`에만 MIT 표기, LICENSE 파일·저작권자 표기 없음)
+- **eclass-cli**: MIT로 사용자가 확인했다 (2026-09-17. README·`package.json`에 MIT 표기, LICENSE 파일은 없음). 코드를 옮기거나 Python으로 번역해 가져오면 `THIRD_PARTY_NOTICES.md`에 출처(github.com/pinion05/eclass-cli)와 MIT 전문을 기록한다.
 - **Inbox Zero 주의**: 본체는 AGPL-3.0, `apps/web/ee/`는 상용 라이선스다. 이 저장소는 MIT이므로 Inbox Zero 코드는 어떤 경우에도 옮기지 않고, `ee/`는 열람하지 않는다.
 - `refs/` 안의 `CLAUDE.md`·`AGENTS.md`는 각 프로젝트 개발용 문서다. 이 저장소 작업에는 적용하지 않는다.
 
@@ -219,10 +219,14 @@ assistant/
 
 ## 10. 진행 상태
 
-- 현재 단계: **1 (구현·테스트 완료, 인터페이스 사용자 확정 대기)**
+- 현재 단계: **2 (구현·테스트 완료, 사용자 보고 후 멈춤)**
 - 0단계 완료 (2026-09-17): 원격 저장소 연결(github.com/ZYONGE/telegram-ai-assistant), `refs/` 클론, `docs/refs/` 메모 4개, `data/profile.md` 양식
-- 1단계 (2026-09-17): `app/` 패키지 구조, `app/core` 인터페이스, `pyproject.toml`(uv), 테스트 32개 통과 (`uv run pytest`)
-- 다음 작업: 인터페이스 확정 후 2단계(세로 한 줄) 계획 제시
+- 1단계 완료 (2026-09-17): `app/` 패키지 구조, `app/core` 인터페이스 확정
+- 2단계 (2026-09-17): 설정(`config.toml` + `.env`), SQLite(할 일·알림 기록), 알림 게이트, 발송기, 수집 입구, 텔레그램 발송, 가짜 수집기, 1회 실행(`python -m app.main`). 테스트 81개 통과
+- 다음 작업: 사용자님이 `.env`를 채우고 1회 실행으로 텔레그램 수신 확인 → 3단계 계획
+- 나중에 처리할 것
+  - `collector_failed`의 ref_id가 원인별로 고정이라 같은 원인의 실패는 한 번만 알린다. 8단계(수집 실패 알림)에서 재알림 주기를 정한다
+  - 알림 문장은 아직 모델 없이 만든다. 3단계에서 Haiku로 다듬는다
 - 환경 메모
   - Python 3.14.7(`C:\Python314`) 사용. 이 PC는 `AppData\Roaming` 아래 junction 실행이 막혀 있어 uv 관리형 Python을 쓰지 않는다 (`%APPDATA%\uv\uv.toml`: `python-downloads = "manual"`)
   - uv는 PATH에 없다. `py -3.14 -m uv ...`로 실행한다

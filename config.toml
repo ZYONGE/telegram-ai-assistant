@@ -1,0 +1,13 @@
+# 비밀값은 여기에 직접 쓰지 않는다. .env에 두고 ${이름}으로 참조한다.
+
+[telegram]
+bot_token = "${TELEGRAM_BOT_TOKEN}"
+allowed_user_id = "${TELEGRAM_ALLOWED_USER_ID}"
+
+[notification]
+quiet_start = "23:00"
+quiet_end = "06:30"
+daily_limit = 5
+
+[storage]
+db_path = "data/assistant.db"

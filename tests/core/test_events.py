@@ -2,13 +2,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.core.events import (
-    META_USER_REQUESTED,
-    Event,
-    EventKind,
-    EventSource,
-    collector_failed,
-)
+from app.core.events import Event, EventKind, EventSource, collector_failed
 
 
 def make_event(**overrides):
@@ -40,8 +34,9 @@ def test_event_accepts_aware_due_at():
     assert make_event(due_at=due).due_at == due
 
 
-def test_user_requested_flag_comes_from_meta():
-    assert make_event(meta={META_USER_REQUESTED: True}).user_requested is True
+def test_user_requested_is_explicit_field():
+    assert make_event(user_requested=True).user_requested is True
+    assert make_event(meta={"user_requested": True}).user_requested is False
 
 
 def test_str_enums_compare_equal_to_plain_strings():
