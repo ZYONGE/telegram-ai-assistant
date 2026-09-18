@@ -29,6 +29,13 @@ GREETING = "{honorific}, 비서가 준비되었습니다. 할 일이나 리마�
 LOCATION_SAVED = "위치를 받았습니다. 이제 이 위치를 기준으로 날씨를 알려 드립니다."
 LOCATION_LIVE = "실시간 위치 공유를 받았습니다. 공유하는 동안 위치를 따라가며 날씨를 봅니다."
 LOCATION_OFF = "위치 기반 날씨가 꺼져 있습니다. config.toml의 [weather] follow_telegram_location을 확인하세요."
+LOCATION_HELP = (
+    "아래 [위치 보내기] 버튼을 누르면 지금 위치가 전송됩니다. 버튼은 대화창에 계속 남아 있어 누를 때마다 갱신됩니다.\n"
+    "이동 중에도 따라가게 하려면 클립(첨부) → 위치 → 실시간 위치 공유를 켜 주세요. 켜 두는 동안 자동으로 갱신됩니다.\n"
+    "한 번 받은 위치는 다음에 보내실 때까지 계속 기준으로 씁니다."
+)
+LOCATION_HIDDEN = "위치 버튼을 치웠습니다. 다시 띄우려면 /location 을 보내 주세요."
+HIDE_WORDS = {"off", "끄기", "숨기기", "치워"}
 
 
 @dataclass(slots=True)
@@ -84,14 +91,35 @@ class ChatHandlers:
     def register(self, application: Application) -> None:
         only_owner = filters.User(user_id=self._allowed_user_id) & filters.ChatType.PRIVATE
         application.add_handler(CommandHandler("start", self.on_start, filters=only_owner))
+        application.add_handler(CommandHandler("location", self.on_location_command, filters=only_owner))
         application.add_handler(MessageHandler(only_owner & filters.TEXT & ~filters.COMMAND, self.on_text))
         # 위치 메시지와 실시간 공유 갱신(edited_message)을 함께 받는다
         application.add_handler(MessageHandler(only_owner & filters.LOCATION, self.on_location))
         application.add_handler(CallbackQueryHandler(self.on_callback))
 
     async def on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        services: ChatServices | None = context.bot_data.get(SERVICES_KEY)
         greeting = GREETING.format(honorific=self._honorific)
-        await TelegramNotifier(context.bot, update.effective_chat.id).send(OutgoingMessage(greeting))
+        # 위치를 아직 한 번도 안 보냈으면 처음부터 버튼을 띄워 둔다
+        need_location = (
+            services is not None and services.location is not None and await services.location.latest() is None
+        )
+        text = f"{greeting}\n\n{LOCATION_HELP}" if need_location else greeting
+        message = OutgoingMessage(text, request_location=need_location)
+        await TelegramNotifier(context.bot, update.effective_chat.id).send(message)
+
+    async def on_location_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """위치 버튼을 띄우거나(기본) 치운다(/location 끄기)."""
+        services: ChatServices = context.bot_data[SERVICES_KEY]
+        notifier = TelegramNotifier(context.bot, update.effective_chat.id)
+        if services.location is None:
+            await notifier.send(OutgoingMessage(LOCATION_OFF))
+            return
+        argument = (update.effective_message.text or "").partition(" ")[2].strip().lower()
+        if argument in HIDE_WORDS:
+            await notifier.send(OutgoingMessage(LOCATION_HIDDEN, remove_keyboard=True))
+            return
+        await notifier.send(OutgoingMessage(LOCATION_HELP, request_location=True))
 
     async def on_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         services: ChatServices = context.bot_data[SERVICES_KEY]
@@ -130,7 +158,10 @@ class ChatHandlers:
         # 실시간 공유 중 자동 갱신에는 답하지 않는다
         if update.edited_message is not None:
             return
-        await notifier.send(OutgoingMessage(LOCATION_LIVE if live_period else LOCATION_SAVED))
+        # 버튼은 그대로 두어 다음에도 한 번에 보낼 수 있게 한다
+        await notifier.send(
+            OutgoingMessage(LOCATION_LIVE if live_period else LOCATION_SAVED, request_location=True)
+        )
 
     async def on_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query

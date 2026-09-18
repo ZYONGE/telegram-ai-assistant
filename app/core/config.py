@@ -81,8 +81,10 @@ class WeatherSettings:
     place: str = ""
     # 텔레그램으로 보낸 위치를 기준으로 삼는다 (실시간 공유 중에는 자동 갱신)
     follow_telegram_location: bool = True
-    # 받은 위치를 이 시간까지만 쓴다. 지나면 아래 고정 좌표로 돌아간다.
-    location_ttl_hours: int = 24
+    # 받은 위치를 이 시간까지만 쓴다. 0이면 만료 없이 계속 쓴다 (기본값).
+    location_ttl_hours: int = 0
+    # 이 시간 안에 받은 위치는 "현재 위치", 그보다 오래되면 "마지막 위치"로 표시한다
+    location_recent_hours: int = 6
 
 
 @dataclass(frozen=True, slots=True)
@@ -239,5 +241,6 @@ def _weather(section: Mapping[str, Any], env: Mapping[str, str]) -> WeatherSetti
         lon=float(section["lon"]) if "lon" in section else None,
         place=str(section.get("place", "")),
         follow_telegram_location=bool(section.get("follow_telegram_location", True)),
-        location_ttl_hours=int(section.get("location_ttl_hours", 24)),
+        location_ttl_hours=int(section.get("location_ttl_hours", 0)),
+        location_recent_hours=int(section.get("location_recent_hours", 6)),
     )

@@ -35,8 +35,10 @@ location = "global"
 [weather]
 # 텔레그램으로 보낸 위치를 따라간다 (실시간 위치 공유 중에는 자동 갱신)
 follow_telegram_location = true
-# 받은 위치를 이 시간까지만 쓴다. 지나면 local.toml의 고정 좌표로 돌아간다.
-location_ttl_hours = 24
+# 받은 위치의 유효 시간. 0이면 만료 없이 마지막 위치를 계속 쓴다.
+location_ttl_hours = 0
+# 이 시간 안에 받은 위치는 "현재 위치", 그보다 오래되면 "마지막 위치"로 표시한다
+location_recent_hours = 6
 
 [notification]
 quiet_start = "23:00"

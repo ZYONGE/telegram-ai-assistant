@@ -5,6 +5,7 @@ from app.collectors.weather import (
     DISABLED_MESSAGE,
     LIVE_PLACE,
     NO_LOCATION_MESSAGE,
+    STALE_PLACE,
     KmaWeather,
     WeatherUnavailable,
     base_time,
@@ -252,8 +253,25 @@ async def test_recent_location_is_used_instead_of_configured_place():
     assert forecast.place == LIVE_PLACE
 
 
-async def test_stale_location_falls_back_to_configured_place():
+async def test_old_location_is_kept_by_default_but_labelled():
+    # 기본값(location_ttl_hours = 0)은 만료 없이 마지막 위치를 계속 쓴다
     stored = StoredLocation(35.1796, 129.0756, kst(9, 16, 7))  # 이틀 전
+    weather, client = located_weather(stored, nx=60, ny=127, place="설정 동네")
+    async with client:
+        forecast = await weather.forecast(kst(9, 18, 7))
+    assert forecast.place == STALE_PLACE
+
+
+async def test_live_sharing_is_always_current():
+    stored = StoredLocation(35.1796, 129.0756, kst(9, 18, 0), live_until=kst(9, 18, 8))
+    weather, client = located_weather(stored)
+    async with client:
+        forecast = await weather.forecast(kst(9, 18, 7))
+    assert forecast.place == LIVE_PLACE
+
+
+async def test_expiry_can_be_turned_on():
+    stored = StoredLocation(35.1796, 129.0756, kst(9, 16, 7))
     weather, client = located_weather(stored, nx=60, ny=127, place="설정 동네", location_ttl_hours=24)
     async with client:
         forecast = await weather.forecast(kst(9, 18, 7))

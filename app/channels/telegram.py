@@ -2,11 +2,13 @@
 
 from typing import Any, Protocol
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
 
-from app.core.interfaces import Button, OutgoingMessage
+from app.core.interfaces import OutgoingMessage
 
 TELEGRAM_MAX_LEN = 4096
+# 한 번 누르면 현재 위치가 전송된다. 대화창에 계속 남겨 둔다.
+LOCATION_BUTTON = "📍 현재 위치 보내기"
 
 
 class _MessageSender(Protocol):
@@ -20,7 +22,7 @@ class TelegramNotifier:
 
     async def send(self, message: OutgoingMessage) -> None:
         chunks = split_text(message.text)
-        markup = _keyboard(message.buttons)
+        markup = _keyboard(message)
         for index, chunk in enumerate(chunks):
             is_last = index == len(chunks) - 1
             # parse_mode를 지정하지 않아 마크다운이 해석되지 않는다
@@ -50,9 +52,18 @@ def split_text(text: str, limit: int = TELEGRAM_MAX_LEN) -> list[str]:
     return chunks
 
 
-def _keyboard(buttons: tuple[Button, ...]) -> InlineKeyboardMarkup | None:
-    if not buttons:
-        return None
-    return InlineKeyboardMarkup(
-        [[InlineKeyboardButton(button.label, callback_data=button.callback_data)] for button in buttons]
-    )
+def _keyboard(message: OutgoingMessage):
+    """확인 버튼은 메시지에 붙는 인라인 버튼, 위치 버튼은 대화창 아래 고정 버튼이다."""
+    if message.buttons:
+        return InlineKeyboardMarkup(
+            [[InlineKeyboardButton(button.label, callback_data=button.callback_data)] for button in message.buttons]
+        )
+    if message.request_location:
+        return ReplyKeyboardMarkup(
+            [[KeyboardButton(LOCATION_BUTTON, request_location=True)]],
+            resize_keyboard=True,
+            is_persistent=True,
+        )
+    if message.remove_keyboard:
+        return ReplyKeyboardRemove()
+    return None

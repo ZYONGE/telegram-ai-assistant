@@ -6,6 +6,7 @@ from app.channels.telegram_bot import (
     CANCEL,
     CONFIRM,
     FALLBACK_REPLY,
+    LOCATION_HIDDEN,
     LOCATION_LIVE,
     LOCATION_OFF,
     LOCATION_SAVED,
@@ -168,10 +169,16 @@ def test_handlers_only_accept_owner_private_chat():
     application = Application.builder().token("123:abc").build()
     ChatHandlers(allowed_user_id=42).register(application)
     handlers = application.handlers[0]
-    assert [type(h) for h in handlers] == [CommandHandler, MessageHandler, MessageHandler, CallbackQueryHandler]
-    message_filter = handlers[1].filters
+    assert [type(h) for h in handlers] == [
+        CommandHandler,  # /start
+        CommandHandler,  # /location
+        MessageHandler,  # 일반 대화
+        MessageHandler,  # 위치 메시지와 실시간 공유 갱신
+        CallbackQueryHandler,
+    ]
+    message_filter = handlers[2].filters
     assert "42" in repr(message_filter) and "private" in repr(message_filter).lower()
-    location_filter = repr(handlers[2].filters)
+    location_filter = repr(handlers[3].filters)
     assert "LOCATION" in location_filter.upper() and "42" in location_filter
 
 
@@ -240,3 +247,45 @@ async def test_coordinates_never_appear_in_logs(located, caplog):
     with caplog.at_level(logging.INFO):
         await ChatHandlers(allowed_user_id=1).on_location(location_update(), context_for(FakeBot(), located))
     assert "37.5665" not in caplog.text and "126.978" not in caplog.text
+
+
+def command_update(text="/location"):
+    return SimpleNamespace(
+        effective_chat=SimpleNamespace(id=1),
+        effective_message=SimpleNamespace(text=text),
+    )
+
+
+async def test_location_command_shows_the_button(located):
+    bot = FakeBot()
+    await ChatHandlers(allowed_user_id=1).on_location_command(command_update(), context_for(bot, located))
+    text, markup = bot.sent[0][1], bot.sent[0][2]
+    assert text.startswith("아래 [위치 보내기] 버튼")
+    assert markup.keyboard[0][0].request_location is True
+    assert markup.is_persistent is True
+
+
+async def test_location_command_can_hide_the_button(located):
+    bot = FakeBot()
+    await ChatHandlers(allowed_user_id=1).on_location_command(
+        command_update("/location 끄기"), context_for(bot, located)
+    )
+    assert bot.sent[0][1] == LOCATION_HIDDEN
+    assert bot.sent[0][2].__class__.__name__ == "ReplyKeyboardRemove"
+
+
+async def test_start_offers_the_button_until_a_location_is_known(located):
+    bot = FakeBot()
+    handlers = ChatHandlers(allowed_user_id=1, honorific="길동님")
+    await handlers.on_start(update_for("/start"), context_for(bot, located))
+    assert "위치 보내기" in bot.sent[0][1] and bot.sent[0][2] is not None
+
+    await located.location.save(37.5665, 126.9780, kst(9, 18, 11))
+    await handlers.on_start(update_for("/start"), context_for(bot, located))
+    assert "위치 보내기" not in bot.sent[1][1] and bot.sent[1][2] is None
+
+
+async def test_saved_location_reply_keeps_the_button(located):
+    bot = FakeBot()
+    await ChatHandlers(allowed_user_id=1).on_location(location_update(), context_for(bot, located))
+    assert bot.sent[0][2].keyboard[0][0].request_location is True

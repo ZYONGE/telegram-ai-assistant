@@ -190,6 +190,10 @@ class OutgoingMessage:
     # 마크다운 서식 없이 보낸다. 4,096자 초과 분할은 채널 구현이 맡는다.
     text: str
     buttons: tuple[Button, ...] = ()
+    # 한 번 눌러 현재 위치를 보내는 버튼을 대화창에 띄운다
+    request_location: bool = False
+    # 띄워 둔 버튼을 치운다
+    remove_keyboard: bool = False
 
 
 @runtime_checkable

@@ -58,6 +58,7 @@ NO_LOCATION_MESSAGE = (
 )
 # 위치를 기준으로 볼 때 브리핑에 붙는 이름
 LIVE_PLACE = "현재 위치"
+STALE_PLACE = "마지막 위치"
 
 
 class LocationSource(Protocol):
@@ -255,7 +256,9 @@ class KmaWeather:
         self._endpoint = endpoint
         self._grid = grid_of(settings)
         self._location = location if settings.follow_telegram_location else None
-        self._ttl = timedelta(hours=max(settings.location_ttl_hours, 0))
+        # ttl이 0이면 만료 없이 마지막 위치를 계속 쓴다
+        self._ttl = timedelta(hours=settings.location_ttl_hours) if settings.location_ttl_hours > 0 else None
+        self._recent = timedelta(hours=max(settings.location_recent_hours, 0))
 
     @property
     def enabled(self) -> bool:
@@ -265,11 +268,15 @@ class KmaWeather:
         """이번 조회에 쓸 격자 좌표와 지역 이름. 기준이 없으면 None."""
         if self._location is not None:
             stored = await self._location.latest()
-            if stored is not None and stored.is_fresh(now, self._ttl):
-                return to_grid(stored.lat, stored.lon), LIVE_PLACE
+            if stored is not None and (self._ttl is None or stored.is_fresh(now, self._ttl)):
+                return to_grid(stored.lat, stored.lon), self._label(stored, now)
         if self._grid != (0, 0):
             return self._grid, self._settings.place
         return None
+
+    def _label(self, stored: StoredLocation, now: datetime) -> str:
+        sharing = stored.live_until is not None and stored.live_until > now
+        return LIVE_PLACE if sharing or stored.is_fresh(now, self._recent) else STALE_PLACE
 
     async def forecast(self, now: datetime, days_ahead: int = 0) -> DayForecast:
         if not self.enabled:
