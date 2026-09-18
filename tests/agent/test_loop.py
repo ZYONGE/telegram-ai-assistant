@@ -238,6 +238,13 @@ async def test_run_task_is_separate_from_chat_and_has_no_button_tools(make_assis
     assert await conversation.active_messages() == []
 
 
+async def test_weekly_plan_uses_its_own_prompt():
+    client = FakeGenAI(gemini_response(text_part("월요일에 보고서를 마무리하시면 좋겠습니다.")))
+    light = LightModel(GeminiModel(client, "light"))
+    assert await light.polish_briefing(BriefingKind.WEEKLY, "초안") == "월요일에 보고서를 마무리하시면 좋겠습니다."
+    assert "주간 계획" in client.models.calls[0]["config"].system_instruction
+
+
 async def test_polish_falls_back_to_draft():
     failing = LightModel(GeminiModel(FakeGenAI(server_error()), "light"))
     assert await failing.polish_briefing(BriefingKind.MORNING, "초안") == "초안"

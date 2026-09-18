@@ -42,7 +42,7 @@
 | 모델 호출 경로 | 목표는 Cloud 결제 계정을 연결한 Google Cloud 프로젝트로 호출하는 것이다 (B안, 무료 티어 데이터 학습 사용 회피). 기본은 그 프로젝트의 Gemini API 키, 선택으로 Vertex AI. **현재는 결제 미연결 무료 티어 키로 운영 중** (`allow_free_tier = true`, 사용자 결정) |
 | 저장소 | 구조화 데이터는 SQLite, 장기 기억만 마크다운 파일 |
 | 스케줄러 | APScheduler + SQLite 작업 저장 (재시작 후에도 예약 유지). 작업 원본은 `scheduled_tasks` 표, APScheduler는 메모리에서 시각만 계산 (`docs/adr/0002`) |
-| 외부 연동 | Google Calendar API, Gmail API(`gmail.modify`), 기상청 단기예보 API, 웹 검색 API |
+| 외부 연동 | Google Calendar API, Gmail API(`gmail.modify`), 기상청 단기예보 API, 웹 검색은 Gemini의 Google 검색 그라운딩 (`docs/adr/0005`) |
 | eClass 수집 | Python Playwright(async) + BeautifulSoup |
 | 시간 | 저장은 UTC, 판단·표시는 `Asia/Seoul` |
 | 배포 | Docker Compose → Oracle Cloud Always Free A1 (Ubuntu 24.04, **arm64**) |
@@ -221,11 +221,11 @@ assistant/
 | 7 | 감시 기능: 인턴 지원 관리, 채용 공고 감시, 교환학생 공지 | 각 기능 테스트 통과 |
 | 8 | 운영: OCI 배포, 야간 백업, 수집 실패 알림, 로그 | 서버에서 24시간 동작 |
 
-`prompts/system_prompt.md`는 v0.3이다 (호칭은 `{honorific}` 자리표시). 기능이 늘 때마다 "할 수 있는 일"과 "실행과 확인" 절을 갱신한다.
+`prompts/system_prompt.md`는 v0.4다 (호칭은 `{honorific}` 자리표시). 기능이 늘 때마다 "할 수 있는 일"과 "실행과 확인" 절을 갱신한다.
 
 ## 10. 진행 상태
 
-- 현재 단계: **3 완료 (2026-09-18), 4단계 계획 전**
+- 현재 단계: **4 완료 (2026-09-18), 5단계 계획 전**
 - 상세 진행 기록, 외부 연동 현황, 다음 작업, 개발 환경 메모는 `docs/progress.md`에 둔다. 단계를 마칠 때마다 두 곳을 함께 갱신한다.
 - 실행: `py -3.14 -m uv run python -m app.main` (Ctrl+C로 종료)
 - 처음 받은 컴퓨터에서는 `templates/`의 양식을 `private/`로 복사해 채운다 (`env.example` → `private/.env`, `profile.example.md` → `private/profile.md`).

@@ -18,6 +18,8 @@ light_model = "gemini-3.5-flash-lite"
 # api_key: Cloud 결제 계정을 연결한 Google Cloud 프로젝트의 Gemini API 키 (private/.env의 GEMINI_API_KEY)
 # vertex : 같은 프로젝트의 Vertex AI (private/.env의 GOOGLE_APPLICATION_CREDENTIALS, 아래 project 필요)
 backend = "api_key"
+# 웹 검색(Google 검색 그라운딩) 사용 여부. 끄면 web_search 도구가 꺼져 있다고 답한다.
+web_search = true
 # 무료 티어는 입력 내용이 제품 개선에 쓰일 수 있다. 프로젝트에 결제 계정을 연결한 뒤 true로 바꾼다.
 billing_enabled = false
 # 결제 연결 전 무료 티어 키로 운영하는 것을 허용한다 (2026-09-18 사용자 결정, 실행 때마다 경고).
@@ -27,6 +29,11 @@ allow_free_tier = true
 project = ""
 location = "global"
 
+# 날씨 (기상청 단기예보). 키는 private/.env의 WEATHER_API_KEY에 둔다.
+# 동네 좌표(nx·ny 또는 lat·lon)와 지역 이름은 개인정보라 private/local.toml에 둔다.
+# 둘 중 하나라도 없으면 날씨 기능만 꺼지고 나머지는 그대로 동작한다.
+[weather]
+
 [notification]
 quiet_start = "23:00"
 quiet_end = "06:30"
@@ -35,6 +42,8 @@ daily_limit = 5
 [briefing]
 morning = "07:00"
 evening = "22:00"
+# 주간 계획은 일요일 이 시각에 보낸다
+weekly = "21:00"
 
 [conversation]
 idle_compact_minutes = 30

@@ -23,7 +23,7 @@ from google.genai import types
 
 from app.core.config import ConfigError, LLMSettings
 from app.core.interfaces import ToolResult
-from app.llm.base import LLM, Finish, LLMError, ModelTurn, ToolCall, TransientLLMError, Turn
+from app.llm.base import LLM, Finish, LLMError, ModelTurn, SearchResult, ToolCall, TransientLLMError, Turn
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +36,13 @@ _BLOCKED = {
     types.FinishReason.SPII,
 }
 _TOOL_RESULT_LIMIT = 300
+_MAX_SOURCES = 5
+
+# 웹 검색용 별도 호출. 대화 루프의 도구 호출과 섞지 않으려고 따로 부른다.
+SEARCH_SYSTEM = (
+    "웹 검색 결과를 바탕으로 질문에 한국어로 간결하게 답한다. "
+    "확인된 내용만 적고, 확실하지 않으면 모른다고 적는다. 다섯 문장을 넘기지 않는다."
+)
 
 
 async def create(settings: LLMSettings, client_factory: Callable[..., Any] = genai.Client) -> LLM:
@@ -45,10 +52,13 @@ async def create(settings: LLMSettings, client_factory: Callable[..., Any] = gen
     except Exception:
         await client.aio.aclose()
         raise
+    # 웹 검색은 Google 검색 그라운딩을 쓴다. 끄려면 [llm.gemini] web_search = false.
+    search = GeminiSearch(client, settings.light_model) if settings.options.get("web_search", True) else None
     return LLM(
         chat=GeminiModel(client, settings.chat_model),
         light=GeminiModel(client, settings.light_model),
         close=client.aio.aclose,
+        search=search,
     )
 
 
@@ -115,16 +125,8 @@ class GeminiModel:
                 contents=[types.Content.model_validate(turn) for turn in merge_same_role(history)],
                 config=config,
             )
-        except genai_errors.ServerError as exc:
-            raise TransientLLMError(f"Gemini 서버 오류 (HTTP {exc.code})") from exc
-        except genai_errors.ClientError as exc:
-            if exc.code == 429:
-                raise TransientLLMError("Gemini 요청 한도 초과 (HTTP 429)") from exc
-            raise LLMError(f"Gemini 요청 오류 (HTTP {exc.code})") from exc
-        except genai_errors.APIError as exc:
-            raise LLMError(f"Gemini 오류 (HTTP {exc.code})") from exc
-        except httpx.TransportError as exc:
-            raise TransientLLMError(f"Gemini 연결 실패 ({type(exc).__name__})") from exc
+        except (genai_errors.APIError, httpx.TransportError) as exc:
+            raise as_llm_error(exc) from exc
         return to_model_turn(response)
 
     def user_turn(self, texts: list[str]) -> Turn:
@@ -163,6 +165,58 @@ class GeminiModel:
                     value = json.dumps(value, ensure_ascii=False)
                 lines.append(f"도구 결과: {value[:_TOOL_RESULT_LIMIT]}")
         return lines
+
+
+class GeminiSearch:
+    """Google 검색 그라운딩으로 최신 정보를 찾는다. 결과 문장과 출처만 돌려준다."""
+
+    def __init__(self, client: Any, model: str) -> None:
+        self._client = client
+        self.model = model
+
+    async def search(self, query: str, *, max_tokens: int = 800) -> SearchResult:
+        config = types.GenerateContentConfig(
+            system_instruction=SEARCH_SYSTEM,
+            max_output_tokens=max_tokens,
+            tools=[types.Tool(google_search=types.GoogleSearch())],
+        )
+        try:
+            response = await self._client.aio.models.generate_content(
+                model=self.model,
+                contents=[types.Content(role="user", parts=[types.Part(text=query)])],
+                config=config,
+            )
+        except (genai_errors.APIError, httpx.TransportError) as exc:
+            raise as_llm_error(exc) from exc
+        turn = to_model_turn(response)
+        if turn.finish is Finish.BLOCKED:
+            raise LLMError("검색 결과가 안전 정책으로 차단되었습니다.")
+        return SearchResult(text=turn.text, sources=tuple(grounding_sources(response)))
+
+
+def grounding_sources(response: types.GenerateContentResponse) -> list[str]:
+    """그라운딩에 쓰인 출처. 사용자에게 함께 보여 준다."""
+    candidates = response.candidates or []
+    metadata = candidates[0].grounding_metadata if candidates else None
+    sources = []
+    for chunk in (metadata.grounding_chunks if metadata else None) or []:
+        web = getattr(chunk, "web", None)
+        if web and web.uri:
+            sources.append(f"{web.title} {web.uri}" if web.title else web.uri)
+    return sources[:_MAX_SOURCES]
+
+
+def as_llm_error(exc: Exception) -> LLMError:
+    """제공사 예외를 공통 오류로 바꾼다. 메시지에 요청 내용이나 비밀값을 넣지 않는다."""
+    if isinstance(exc, genai_errors.ServerError):
+        return TransientLLMError(f"Gemini 서버 오류 (HTTP {exc.code})")
+    if isinstance(exc, genai_errors.ClientError):
+        if exc.code == 429:
+            return TransientLLMError("Gemini 요청 한도 초과 (HTTP 429)")
+        return LLMError(f"Gemini 요청 오류 (HTTP {exc.code})")
+    if isinstance(exc, genai_errors.APIError):
+        return LLMError(f"Gemini 오류 (HTTP {exc.code})")
+    return TransientLLMError(f"Gemini 연결 실패 ({type(exc).__name__})")
 
 
 def to_model_turn(response: types.GenerateContentResponse) -> ModelTurn:

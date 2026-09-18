@@ -127,3 +127,46 @@ def test_compose_orders_sections_by_priority():
     items = [BriefingItem("낮음", "a", 1), BriefingItem("높음", "b", 9), BriefingItem("낮음", "c", 1)]
     text = compose(BriefingKind.EVENING, items, kst(9, 17, 22))
     assert text.splitlines()[1:] == ["", "높음", "· b", "", "낮음", "· a", "· c"]
+
+
+async def seed_next_week(todos, task_service, log):
+    """일요일 저녁 기준: 다음 주는 9월 21일(월)~27일(일)."""
+    now = kst(9, 20, 9)
+    await todos.add("월요일 보고서", now, due_at=kst(9, 21, 23, 59))
+    await todos.add("수요일 발표", now, due_at=kst(9, 23, 13))
+    await todos.add("일요일 정리", now, due_at=kst(9, 27, 23, 59))
+    await todos.add("다다음 주 시험", now, due_at=kst(9, 28, 10))
+    await todos.add("지난 과제", now, due_at=kst(9, 19, 23, 59))
+    await todos.add("마감 없는 일", now)
+    await task_service.create("reminder", "병원 예약", now, run_at=kst(9, 22, 9))
+    await log.save_decision(make_event("n1", title="학과 공지"), GateDecision(GateAction.BATCH, "묶음"), now)
+
+
+async def test_weekly_plan_covers_next_week_only(todos, task_service, log, providers, dispatcher, notifier):
+    await seed_next_week(todos, task_service, log)
+    polisher = FakePolisher()
+    decision = await BriefingService(providers, dispatcher, polisher).send(BriefingKind.WEEKLY, kst(9, 20, 21))
+
+    assert decision.action is GateAction.SEND_NOW
+    text = notifier.sent[0].text
+    assert text.startswith("주간 계획\n사용자님, 다음 주 계획입니다.")
+    sections = [line for line in text.splitlines() if line and not line.startswith(("·", "사용자님", "주간"))]
+    assert sections == ["다음 주 마감", "아직 남은 일", "다음 주 리마인더", "마감 없는 할 일"]
+    assert "월요일 보고서" in text and "수요일 발표" in text and "일요일 정리" in text
+    assert "다다음 주 시험" not in text
+    assert "· 지난 과제 (마감 9월 19일(토) 23:59)" in text
+    assert "· 9월 22일(화) 09:00 병원 예약" in text
+    assert "· 마감 없는 일" in text
+    assert len(polisher.drafts) == 1
+
+
+async def test_weekly_plan_leaves_news_for_the_daily_briefings(todos, task_service, log, providers, dispatcher, notifier):
+    await seed_next_week(todos, task_service, log)
+    await BriefingService(providers, dispatcher, None).send(BriefingKind.WEEKLY, kst(9, 20, 21))
+    assert "학과 공지" not in notifier.sent[0].text
+    assert [r.event.ref_id for r in await log.unbriefed_batch()] == ["n1"]
+
+
+async def test_empty_week_says_so(providers, dispatcher, notifier):
+    await BriefingService(providers, dispatcher, None).send(BriefingKind.WEEKLY, kst(9, 20, 21))
+    assert notifier.sent[0].text.endswith("다음 주에 챙길 마감이나 예약은 없습니다.")

@@ -68,16 +68,21 @@ async def test_conversation_append_archive_and_summary(conversation):
 
 
 async def test_migration_archives_conversations_from_previous_provider(tmp_path):
+    import aiosqlite
+
     from app.storage.db import MIGRATIONS, Database
 
+    # 예전 버전(마이그레이션 2까지)으로 만든 DB
     path = tmp_path / "old.db"
-    db = await Database.open(path)
-    await db.conn.execute("PRAGMA user_version = 2")
-    await db.conn.execute(
+    old_conn = await aiosqlite.connect(path)
+    for script in MIGRATIONS[:2]:
+        await old_conn.executescript(script)
+    await old_conn.execute("PRAGMA user_version = 2")
+    await old_conn.execute(
         "INSERT INTO conversation_messages (role, content, created_at) VALUES ('user', '[]', '2026-09-17T00:00:00.000000+00:00')"
     )
-    await db.conn.commit()
-    await db.close()
+    await old_conn.commit()
+    await old_conn.close()
 
     reopened = await Database.open(path)
     assert await reopened.schema_version() == len(MIGRATIONS)

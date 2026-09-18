@@ -9,6 +9,7 @@ from datetime import date, datetime, time, timedelta
 from typing import Protocol
 
 from app.agent.prompt import DEFAULT_HONORIFIC
+from app.collectors.weather import KmaWeather, WeatherUnavailable
 from app.core.clock import KST, format_kst, to_kst
 from app.core.events import Event, EventKind, EventSource
 from app.core.interfaces import BriefingItem, BriefingKind, BriefingProvider, GateAction, GateDecision
@@ -20,7 +21,13 @@ from app.storage.todos import Todo, TodoRepository
 logger = logging.getLogger(__name__)
 
 _WEEKDAYS = "월화수목금토일"
-TITLES = {BriefingKind.MORNING: "아침 브리핑", BriefingKind.EVENING: "저녁 브리핑"}
+TITLES = {
+    BriefingKind.MORNING: "아침 브리핑",
+    BriefingKind.EVENING: "저녁 브리핑",
+    BriefingKind.WEEKLY: "주간 계획",
+}
+# 주간 계획은 일요일 저녁에 다음 주(월~일)를 본다
+WEEK_DAYS = 7
 
 
 class Polisher(Protocol):
@@ -43,7 +50,16 @@ class TodoBriefing:
 
     async def briefing_items(self, kind: BriefingKind, now: datetime) -> list[BriefingItem]:
         today = _day(now)
-        todos = [t for t in await self._repo.list_open() if t.due_at is not None]
+        opened = await self._repo.list_open()
+        todos = [t for t in opened if t.due_at is not None]
+        if kind is BriefingKind.WEEKLY:
+            start, end = today + timedelta(days=1), today + timedelta(days=WEEK_DAYS)
+            items = [
+                BriefingItem("다음 주 마감", _todo_line(t), 30) for t in todos if start <= _day(t.due_at) <= end
+            ]
+            items += [BriefingItem("아직 남은 일", _todo_line(t), 20) for t in todos if _day(t.due_at) <= today]
+            items += [BriefingItem("마감 없는 할 일", t.title, 10) for t in opened if t.due_at is None][:5]
+            return items
         if kind is BriefingKind.MORNING:
             items = [BriefingItem("오늘 마감", _todo_line(t), 30) for t in todos if _day(t.due_at) == today]
             overdue = [t for t in todos if _day(t.due_at) < today]
@@ -74,14 +90,51 @@ class TaskBriefing:
         self._service = service
 
     async def briefing_items(self, kind: BriefingKind, now: datetime) -> list[BriefingItem]:
-        target = _day(now) + timedelta(days=0 if kind is BriefingKind.MORNING else 1)
-        section = "오늘 리마인더" if kind is BriefingKind.MORNING else "내일 리마인더"
+        today = _day(now)
+        if kind is BriefingKind.WEEKLY:
+            window = (today + timedelta(days=1), today + timedelta(days=WEEK_DAYS))
+            section = "다음 주 리마인더"
+        else:
+            target = today + timedelta(days=0 if kind is BriefingKind.MORNING else 1)
+            window = (target, target)
+            section = "오늘 리마인더" if kind is BriefingKind.MORNING else "내일 리마인더"
+
         items = []
         for task in await self._service.list():
             next_run = self._service.next_run(task.id)
-            if task.status == "active" and next_run and _day(next_run) == target:
-                items.append(BriefingItem(section, f"{to_kst(next_run):%H:%M} {task.content}", 15))
+            if task.status != "active" or next_run is None or not window[0] <= _day(next_run) <= window[1]:
+                continue
+            when = f"{to_kst(next_run):%H:%M}" if section != "다음 주 리마인더" else format_kst(next_run)
+            items.append(BriefingItem(section, f"{when} {task.content}", 15))
         return items
+
+
+class WeatherBriefing:
+    """아침에는 오늘 날씨와 옷차림, 저녁에는 내일 아침 준비용 한 줄.
+
+    옷차림 기본안은 수집기(코드)가 만들고, 모델은 브리핑을 다듬을 때 문장만 손본다.
+    """
+
+    name = "weather"
+
+    def __init__(self, weather: KmaWeather) -> None:
+        self._weather = weather
+
+    async def briefing_items(self, kind: BriefingKind, now: datetime) -> list[BriefingItem]:
+        if kind is BriefingKind.WEEKLY or not self._weather.enabled:
+            return []
+        morning = kind is BriefingKind.MORNING
+        try:
+            forecast = await self._weather.forecast(now, 0 if morning else 1)
+        except WeatherUnavailable as exc:
+            logger.info("날씨 항목 생략: %s", exc)
+            return []
+        if morning:
+            return [
+                BriefingItem("오늘 날씨", forecast.render(), 40),
+                BriefingItem("오늘 날씨", forecast.clothing(), 39),
+            ]
+        return [BriefingItem("내일 날씨", forecast.render(), 9)]
 
 
 class NewsBriefing:
@@ -94,6 +147,8 @@ class NewsBriefing:
         self._shown: list[str] = []
 
     async def briefing_items(self, kind: BriefingKind, now: datetime) -> list[BriefingItem]:
+        if kind is BriefingKind.WEEKLY:
+            return []
         records = await self._log.unbriefed_batch()
         self._shown = [r.event.ref_id for r in records]
         return [
@@ -113,7 +168,10 @@ class NewsBriefing:
 def compose(kind: BriefingKind, items: list[BriefingItem], now: datetime, honorific: str = DEFAULT_HONORIFIC) -> str:
     local = to_kst(now)
     today = f"{local.month}월 {local.day}일({_WEEKDAYS[local.weekday()]})"
-    if kind is BriefingKind.MORNING:
+    if kind is BriefingKind.WEEKLY:
+        lines = [f"{honorific}, 다음 주 계획입니다. (오늘은 {today})"]
+        empty = "다음 주에 챙길 마감이나 예약은 없습니다."
+    elif kind is BriefingKind.MORNING:
         lines = [f"{honorific}, 좋은 아침입니다. {today} 브리핑입니다."]
         empty = "오늘 따로 챙길 마감이나 소식은 없습니다."
     else:

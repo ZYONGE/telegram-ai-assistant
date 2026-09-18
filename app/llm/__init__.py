@@ -8,7 +8,18 @@
 import importlib
 
 from app.core.config import ConfigError, LLMSettings
-from app.llm.base import LLM, ChatModel, Finish, LLMError, ModelTurn, ToolCall, TransientLLMError, Turn
+from app.llm.base import (
+    LLM,
+    ChatModel,
+    Finish,
+    LLMError,
+    ModelTurn,
+    SearchResult,
+    ToolCall,
+    TransientLLMError,
+    Turn,
+    WebSearch,
+)
 
 PROVIDERS: dict[str, str] = {
     "gemini": "app.llm.gemini",
@@ -21,9 +32,11 @@ __all__ = [
     "Finish",
     "LLMError",
     "ModelTurn",
+    "SearchResult",
     "ToolCall",
     "TransientLLMError",
     "Turn",
+    "WebSearch",
     "create_llm",
 ]
 

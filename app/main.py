@@ -7,6 +7,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
+import httpx
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
@@ -19,24 +20,29 @@ from app.agent.loop import Assistant
 from app.agent.memory import MarkdownMemoryStore
 from app.agent.prompt import PromptBuilder, load_identity
 from app.channels.telegram import TelegramNotifier
+from app.collectors.weather import KmaWeather
 from app.channels.telegram_bot import SERVICES_KEY, ChatHandlers, ChatServices
 from app.core.clock import KST, utc_now
 from app.core.config import ConfigError, Settings, load_settings
 from app.core.interfaces import BriefingKind
 from app.llm import LLM, create_llm
-from app.scheduler.briefing import BriefingService, NewsBriefing, TaskBriefing, TodoBriefing
+from app.scheduler.briefing import BriefingService, NewsBriefing, TaskBriefing, TodoBriefing, WeatherBriefing
 from app.scheduler.dispatcher import Dispatcher
 from app.scheduler.gate import RuleBasedGate
 from app.scheduler.tasks import TaskService
+from app.storage.archive import ArchiveRepository
 from app.storage.conversation import ConversationStore, PendingActionStore
 from app.storage.db import Database
 from app.storage.notifications import NotificationLog
 from app.storage.tasks import TaskRepository
 from app.storage.todos import TodoRepository
+from app.tools.archive import archive_tools
 from app.tools.memory import memory_tools
 from app.tools.registry import ToolRegistry
+from app.tools.search import search_tools
 from app.tools.tasks import task_tools
 from app.tools.todos import todo_tools
+from app.tools.weather import weather_tools
 
 logger = logging.getLogger("app")
 
@@ -47,11 +53,13 @@ class Runtime:
     scheduler: AsyncIOScheduler
     llm: LLM
     services: ChatServices
+    http: httpx.AsyncClient
 
     async def close(self) -> None:
         if self.scheduler.running:
             self.scheduler.shutdown(wait=False)
         await self.llm.close()
+        await self.http.aclose()
         await self.db.close()
 
 
@@ -69,26 +77,42 @@ async def create_runtime(settings: Settings, bot: Bot, llm: LLM | None = None) -
     scheduler = AsyncIOScheduler(timezone=KST)
     tasks = TaskService(TaskRepository(db), scheduler, dispatcher)
 
-    registry = ToolRegistry(PendingActionStore(db))
-    memory = MarkdownMemoryStore(settings.storage.memory_path)
-    registry.register(*todo_tools(todos), *memory_tools(memory), *task_tools(tasks))
+    # 외부 HTTP 호출(날씨 등)은 연결을 재사용한다. 종료할 때 함께 닫는다.
+    http = httpx.AsyncClient(timeout=httpx.Timeout(10.0), headers={"Accept": "application/json"})
+    weather = KmaWeather(settings.weather, http)
 
     # 이름·호칭은 git에서 제외된 private/profile.md에서 읽는다
     honorific = load_identity(settings.storage.profile_path).honorific
     light = LightModel(llm.light, honorific)
+
+    registry = ToolRegistry(PendingActionStore(db))
+    memory = MarkdownMemoryStore(settings.storage.memory_path)
+    archive = ArchiveRepository(db)
+    registry.register(
+        *todo_tools(todos),
+        *memory_tools(memory),
+        *task_tools(tasks),
+        *weather_tools(weather),
+        *search_tools(llm.search),
+        *archive_tools(archive, http, light),
+    )
+
     prompt = PromptBuilder(settings.storage.system_prompt_path, settings.storage.profile_path, memory)
     assistant = Assistant(llm.chat, settings.conversation, prompt, conversation, registry, light)
     tasks.set_agent_runner(assistant.run_task)
 
     briefing = BriefingService(
-        [TodoBriefing(todos), TaskBriefing(tasks), NewsBriefing(log)], dispatcher, light, honorific
+        [WeatherBriefing(weather), TodoBriefing(todos), TaskBriefing(tasks), NewsBriefing(log)],
+        dispatcher,
+        light,
+        honorific,
     )
     _add_system_jobs(scheduler, settings, dispatcher, assistant, briefing)
     restored = await tasks.start()
     scheduler.start()
     logger.info("예약 작업 %d건 복원, 스케줄러 시작", restored)
 
-    return Runtime(db, scheduler, llm, ChatServices(assistant, registry, conversation))
+    return Runtime(db, scheduler, llm, ChatServices(assistant, registry, conversation), http)
 
 
 def _add_system_jobs(
@@ -120,6 +144,13 @@ def _add_system_jobs(
             CronTrigger(hour=at.hour, minute=at.minute, timezone=KST),
             id=f"system:briefing:{kind}", coalesce=True, max_instances=1, misfire_grace_time=1800,
         )
+    # 주간 계획: 일요일 저녁에 다음 주를 정리한다
+    weekly = settings.briefing.weekly
+    scheduler.add_job(
+        safe("주간 계획", lambda: briefing.send(BriefingKind.WEEKLY, utc_now())),
+        CronTrigger(day_of_week="sun", hour=weekly.hour, minute=weekly.minute, timezone=KST),
+        id="system:briefing:weekly", coalesce=True, max_instances=1, misfire_grace_time=1800,
+    )
 
 
 def build_application(settings: Settings) -> Application:

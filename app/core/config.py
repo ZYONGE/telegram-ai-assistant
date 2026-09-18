@@ -65,6 +65,23 @@ class LLMSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class WeatherSettings:
+    """기상청 단기예보 설정. 키는 private/.env, 동네 좌표는 private/local.toml에 둔다.
+
+    좌표는 격자(nx, ny)를 바로 적거나 위경도(lat, lon)를 적으면 수집기가 격자로 바꾼다.
+    키나 좌표가 없으면 날씨 기능만 꺼지고 비서는 그대로 동작한다.
+    """
+
+    api_key: str = ""
+    nx: int = 0
+    ny: int = 0
+    lat: float | None = None
+    lon: float | None = None
+    # 브리핑에 붙일 지역 이름. 비워 두면 표시하지 않는다.
+    place: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class ConversationSettings:
     # 마지막 대화 후 이 시간이 지나면 대화를 요약해 압축한다
     idle_compact_minutes: int = 30
@@ -76,6 +93,8 @@ class ConversationSettings:
 class BriefingSettings:
     morning: time = time(7, 0)
     evening: time = time(22, 0)
+    # 주간 계획은 일요일 이 시각에 보낸다
+    weekly: time = time(21, 0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +103,7 @@ class Settings:
     notification: NotificationSettings
     storage: StorageSettings
     llm: LLMSettings = field(default_factory=LLMSettings)
+    weather: WeatherSettings = WeatherSettings()
     conversation: ConversationSettings = ConversationSettings()
     briefing: BriefingSettings = BriefingSettings()
 
@@ -158,6 +178,7 @@ def load_settings(
         notification = data.get("notification", {})
         storage = data["storage"]
         llm = data.get("llm", {})
+        weather = data.get("weather", {})
         conversation = data.get("conversation", {})
         briefing = data.get("briefing", {})
         n_default, l_default = NotificationSettings(), LLMSettings()
@@ -185,6 +206,7 @@ def load_settings(
                 light_model=llm.get("light_model", l_default.light_model),
                 options=dict(llm.get(provider, {})),
             ),
+            weather=_weather(weather, env),
             conversation=ConversationSettings(
                 idle_compact_minutes=int(conversation.get("idle_compact_minutes", c_default.idle_compact_minutes)),
                 max_active_messages=int(conversation.get("max_active_messages", c_default.max_active_messages)),
@@ -192,6 +214,7 @@ def load_settings(
             briefing=BriefingSettings(
                 morning=_time(briefing, "morning", b_default.morning),
                 evening=_time(briefing, "evening", b_default.evening),
+                weekly=_time(briefing, "weekly", b_default.weekly),
             ),
         )
     except (KeyError, TypeError, ValueError) as exc:
@@ -200,3 +223,15 @@ def load_settings(
 
 def _time(section: Mapping[str, Any], key: str, default: time) -> time:
     return time.fromisoformat(section[key]) if key in section else default
+
+
+def _weather(section: Mapping[str, Any], env: Mapping[str, str]) -> WeatherSettings:
+    """날씨 설정. 키는 선택 항목이라 없으면 기능만 끄고 오류를 내지 않는다."""
+    return WeatherSettings(
+        api_key=str(section.get("api_key") or env.get("WEATHER_API_KEY", "")),
+        nx=int(section.get("nx", 0)),
+        ny=int(section.get("ny", 0)),
+        lat=float(section["lat"]) if "lat" in section else None,
+        lon=float(section["lon"]) if "lon" in section else None,
+        place=str(section.get("place", "")),
+    )

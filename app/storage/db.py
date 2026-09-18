@@ -105,6 +105,20 @@ MIGRATIONS: list[str] = [
     -- 모델 제공자 변경(Claude → Gemini)으로 대화 기록 형식이 바뀌어, 이전 기록은 다시 보내지 않는다.
     UPDATE conversation_messages SET archived = 1 WHERE archived = 0;
     """,
+    """
+    -- 보관함: 링크 요약과 텍스트 메모를 한 표에 모은다 (사진·음성은 저장하지 않는다).
+    CREATE TABLE archive_items (
+        id          INTEGER PRIMARY KEY,
+        kind        TEXT NOT NULL CHECK (kind IN ('link', 'note')),
+        title       TEXT NOT NULL,
+        url         TEXT NOT NULL DEFAULT '',
+        summary     TEXT NOT NULL DEFAULT '',
+        body        TEXT NOT NULL DEFAULT '',
+        tags        TEXT NOT NULL DEFAULT '',
+        created_at  TEXT NOT NULL
+    );
+    CREATE INDEX idx_archive_created ON archive_items (created_at);
+    """,
 ]
 
 

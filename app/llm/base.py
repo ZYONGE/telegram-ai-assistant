@@ -45,6 +45,20 @@ class ModelTurn:
     tool_calls: list[ToolCall] = field(default_factory=list)
 
 
+@dataclass(frozen=True, slots=True)
+class SearchResult:
+    """웹 검색 결과. 외부에서 온 내용이므로 데이터로만 다룬다 (절대 규칙 8)."""
+
+    text: str
+    sources: tuple[str, ...] = ()
+
+
+class WebSearch(Protocol):
+    async def search(self, query: str, *, max_tokens: int = 800) -> SearchResult:
+        """실패하면 LLMError(또는 TransientLLMError)를 던진다."""
+        ...
+
+
 class ChatModel(Protocol):
     async def generate(
         self, system: str, history: list[Turn], tools: list[dict[str, Any]], *, max_tokens: int
@@ -74,3 +88,5 @@ class LLM:
     # 브리핑 문장 다듬기, 대화 요약
     light: ChatModel
     close: Callable[[], Awaitable[None]]
+    # 웹 검색. 제공사가 지원하지 않거나 꺼 두면 None이고, 도구가 꺼져 있다고 알린다.
+    search: WebSearch | None = None
