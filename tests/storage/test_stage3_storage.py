@@ -119,3 +119,22 @@ async def test_briefings_do_not_count_toward_daily_limit_and_batch_is_briefed_on
     assert [r.event.ref_id for r in await log.unbriefed_batch()] == ["n1"]
     await log.mark_briefed(["n1"], now)
     assert await log.unbriefed_batch() == []
+
+
+async def test_location_store_keeps_only_the_latest(db):
+    from app.storage.location import LocationStore
+
+    store = LocationStore(db)
+    assert await store.latest() is None
+
+    await store.save(37.5665, 126.9780, kst(9, 18, 7))
+    await store.save(35.1796, 129.0756, kst(9, 18, 9), live_until=kst(9, 18, 10))
+    stored = await store.latest()
+    assert (round(stored.lat, 4), round(stored.lon, 4)) == (35.1796, 129.0756)
+    assert stored.updated_at == kst(9, 18, 9) and stored.live_until == kst(9, 18, 10)
+
+    from datetime import timedelta
+
+    assert stored.is_fresh(kst(9, 18, 20), timedelta(hours=24)) is True
+    assert stored.is_fresh(kst(9, 20, 20), timedelta(hours=24)) is False
+    assert await store.clear() is True and await store.latest() is None

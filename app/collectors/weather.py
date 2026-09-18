@@ -9,11 +9,13 @@ import logging
 import math
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from typing import Protocol
 
 import httpx
 
 from app.core.clock import to_kst
 from app.core.config import WeatherSettings
+from app.storage.location import StoredLocation
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +52,18 @@ DISABLED_MESSAGE = (
     "날씨 설정이 아직 없습니다. private/.env에 WEATHER_API_KEY를 넣고 "
     "private/local.toml에 동네 좌표를 적어 주세요."
 )
+NO_LOCATION_MESSAGE = (
+    "어디 날씨를 볼지 아직 모릅니다. 텔레그램에서 클립(첨부) → 위치를 눌러 지금 위치를 보내 주세요. "
+    "실시간 위치 공유를 켜시면 이동할 때마다 자동으로 따라갑니다."
+)
+# 위치를 기준으로 볼 때 브리핑에 붙는 이름
+LIVE_PLACE = "현재 위치"
+
+
+class LocationSource(Protocol):
+    """마지막으로 받은 위치를 돌려준다 (app/storage/location.py)."""
+
+    async def latest(self) -> StoredLocation | None: ...
 
 
 class WeatherUnavailable(Exception):
@@ -221,23 +235,49 @@ def _slot(name: str, hours: tuple[int, ...], by_hour: dict[int, dict[str, object
 
 
 class KmaWeather:
-    """기상청 단기예보 수집기. 설정이 없으면 enabled가 False다."""
+    """기상청 단기예보 수집기.
+
+    기준 좌표는 (1) 텔레그램으로 받은 최근 위치, (2) 설정에 적어 둔 동네 순으로 고른다.
+    좌표는 격자로 바꿔서만 쓰고, 로그나 오류 메시지에 남기지 않는다.
+    """
 
     name = "weather"
 
-    def __init__(self, settings: WeatherSettings, client: httpx.AsyncClient, endpoint: str = ENDPOINT) -> None:
+    def __init__(
+        self,
+        settings: WeatherSettings,
+        client: httpx.AsyncClient,
+        endpoint: str = ENDPOINT,
+        location: LocationSource | None = None,
+    ) -> None:
         self._settings = settings
         self._client = client
         self._endpoint = endpoint
         self._grid = grid_of(settings)
+        self._location = location if settings.follow_telegram_location else None
+        self._ttl = timedelta(hours=max(settings.location_ttl_hours, 0))
 
     @property
     def enabled(self) -> bool:
-        return bool(self._settings.api_key) and self._grid != (0, 0)
+        return bool(self._settings.api_key) and (self._grid != (0, 0) or self._location is not None)
+
+    async def where(self, now: datetime) -> tuple[tuple[int, int], str] | None:
+        """이번 조회에 쓸 격자 좌표와 지역 이름. 기준이 없으면 None."""
+        if self._location is not None:
+            stored = await self._location.latest()
+            if stored is not None and stored.is_fresh(now, self._ttl):
+                return to_grid(stored.lat, stored.lon), LIVE_PLACE
+        if self._grid != (0, 0):
+            return self._grid, self._settings.place
+        return None
 
     async def forecast(self, now: datetime, days_ahead: int = 0) -> DayForecast:
         if not self.enabled:
             raise WeatherUnavailable(DISABLED_MESSAGE)
+        where = await self.where(now)
+        if where is None:
+            raise WeatherUnavailable(NO_LOCATION_MESSAGE)
+        (nx, ny), place = where
         base_date, base_hour = base_time(now)
         params = {
             "serviceKey": self._settings.api_key,
@@ -246,8 +286,8 @@ class KmaWeather:
             "dataType": "JSON",
             "base_date": base_date,
             "base_time": base_hour,
-            "nx": self._grid[0],
-            "ny": self._grid[1],
+            "nx": nx,
+            "ny": ny,
         }
         try:
             response = await self._client.get(self._endpoint, params=params)
@@ -262,4 +302,4 @@ class KmaWeather:
         except ValueError:
             raise WeatherUnavailable("기상청 응답을 읽지 못했습니다.") from None
         day = (to_kst(now) + timedelta(days=days_ahead)).date()
-        return build_forecast(read_items(payload), day, self._settings.place)
+        return build_forecast(read_items(payload), day, place)

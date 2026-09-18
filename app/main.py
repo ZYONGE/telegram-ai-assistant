@@ -32,6 +32,7 @@ from app.scheduler.gate import RuleBasedGate
 from app.scheduler.tasks import TaskService
 from app.storage.archive import ArchiveRepository
 from app.storage.conversation import ConversationStore, PendingActionStore
+from app.storage.location import LocationStore
 from app.storage.db import Database
 from app.storage.notifications import NotificationLog
 from app.storage.tasks import TaskRepository
@@ -45,6 +46,9 @@ from app.tools.todos import todo_tools
 from app.tools.weather import weather_tools
 
 logger = logging.getLogger("app")
+
+# 실시간 위치 공유는 edited_message로 들어온다
+ALLOWED_UPDATES = ["message", "edited_message", "callback_query"]
 
 
 @dataclass(slots=True)
@@ -79,7 +83,9 @@ async def create_runtime(settings: Settings, bot: Bot, llm: LLM | None = None) -
 
     # 외부 HTTP 호출(날씨 등)은 연결을 재사용한다. 종료할 때 함께 닫는다.
     http = httpx.AsyncClient(timeout=httpx.Timeout(10.0), headers={"Accept": "application/json"})
-    weather = KmaWeather(settings.weather, http)
+    # 날씨 기준 좌표: 사용자가 텔레그램으로 보낸 최근 위치 → 없으면 설정의 동네
+    location = LocationStore(db)
+    weather = KmaWeather(settings.weather, http, location=location)
 
     # 이름·호칭은 git에서 제외된 private/profile.md에서 읽는다
     honorific = load_identity(settings.storage.profile_path).honorific
@@ -112,7 +118,7 @@ async def create_runtime(settings: Settings, bot: Bot, llm: LLM | None = None) -
     scheduler.start()
     logger.info("예약 작업 %d건 복원, 스케줄러 시작", restored)
 
-    return Runtime(db, scheduler, llm, ChatServices(assistant, registry, conversation), http)
+    return Runtime(db, scheduler, llm, ChatServices(assistant, registry, conversation, location=location), http)
 
 
 def _add_system_jobs(
@@ -184,7 +190,7 @@ def main() -> None:
     try:
         application = build_application(load_settings())
         logger.info("비서를 시작합니다. 종료하려면 Ctrl+C를 누르세요.")
-        application.run_polling(allowed_updates=["message", "callback_query"])
+        application.run_polling(allowed_updates=ALLOWED_UPDATES)
     except ConfigError as exc:
         logger.error("설정 오류: %s", exc)
         raise SystemExit(1) from None

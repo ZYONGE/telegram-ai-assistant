@@ -119,6 +119,16 @@ MIGRATIONS: list[str] = [
     );
     CREATE INDEX idx_archive_created ON archive_items (created_at);
     """,
+    """
+    -- 텔레그램으로 받은 마지막 위치 (한 줄만 유지). 좌표는 개인정보라 이 DB 밖으로 내보내지 않는다.
+    CREATE TABLE user_location (
+        id          INTEGER PRIMARY KEY CHECK (id = 1),
+        lat         REAL NOT NULL,
+        lon         REAL NOT NULL,
+        updated_at  TEXT NOT NULL,
+        live_until  TEXT
+    );
+    """,
 ]
 
 

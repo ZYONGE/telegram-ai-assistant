@@ -30,9 +30,13 @@ project = ""
 location = "global"
 
 # 날씨 (기상청 단기예보). 키는 private/.env의 WEATHER_API_KEY에 둔다.
-# 동네 좌표(nx·ny 또는 lat·lon)와 지역 이름은 개인정보라 private/local.toml에 둔다.
-# 둘 중 하나라도 없으면 날씨 기능만 꺼지고 나머지는 그대로 동작한다.
+# 기준 좌표는 (1) 텔레그램으로 보낸 최근 위치, (2) private/local.toml에 적어 둔 동네 순으로 고른다.
+# 좌표는 개인정보라 이 파일에 적지 않는다. 키가 없으면 날씨 기능만 꺼진다.
 [weather]
+# 텔레그램으로 보낸 위치를 따라간다 (실시간 위치 공유 중에는 자동 갱신)
+follow_telegram_location = true
+# 받은 위치를 이 시간까지만 쓴다. 지나면 local.toml의 고정 좌표로 돌아간다.
+location_ttl_hours = 24
 
 [notification]
 quiet_start = "23:00"

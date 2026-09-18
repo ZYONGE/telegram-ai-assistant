@@ -3,7 +3,7 @@
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from telegram import Update
 from telegram.constants import ChatAction
@@ -16,6 +16,7 @@ from app.core.clock import utc_now
 from app.core.interfaces import Button, OutgoingMessage
 from app.llm import TransientLLMError
 from app.storage.conversation import ConversationStore, PendingAction
+from app.storage.location import LocationStore
 from app.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -25,6 +26,9 @@ CONFIRM, CANCEL = "confirm", "cancel"
 FALLBACK_REPLY = "지금은 답변을 만들 수 없습니다. 잠시 후 다시 말씀해 주세요."
 ALREADY_HANDLED = "이미 처리된 요청입니다."
 GREETING = "{honorific}, 비서가 준비되었습니다. 할 일이나 리마인더를 편하게 말씀해 주세요."
+LOCATION_SAVED = "위치를 받았습니다. 이제 이 위치를 기준으로 날씨를 알려 드립니다."
+LOCATION_LIVE = "실시간 위치 공유를 받았습니다. 공유하는 동안 위치를 따라가며 날씨를 봅니다."
+LOCATION_OFF = "위치 기반 날씨가 꺼져 있습니다. config.toml의 [weather] follow_telegram_location을 확인하세요."
 
 
 @dataclass(slots=True)
@@ -33,6 +37,8 @@ class ChatServices:
     registry: ToolRegistry
     conversation: ConversationStore
     clock: Callable[[], datetime] = utc_now
+    # 사용자가 보낸 위치를 저장한다. 꺼져 있으면 None.
+    location: LocationStore | None = None
 
 
 def confirmation_message(action: PendingAction) -> OutgoingMessage:
@@ -79,6 +85,8 @@ class ChatHandlers:
         only_owner = filters.User(user_id=self._allowed_user_id) & filters.ChatType.PRIVATE
         application.add_handler(CommandHandler("start", self.on_start, filters=only_owner))
         application.add_handler(MessageHandler(only_owner & filters.TEXT & ~filters.COMMAND, self.on_text))
+        # 위치 메시지와 실시간 공유 갱신(edited_message)을 함께 받는다
+        application.add_handler(MessageHandler(only_owner & filters.LOCATION, self.on_location))
         application.add_handler(CallbackQueryHandler(self.on_callback))
 
     async def on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -101,6 +109,28 @@ class ChatHandlers:
         await notifier.send(OutgoingMessage(reply.text))
         for action in reply.confirmations:
             await notifier.send(confirmation_message(action))
+
+    async def on_location(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """사용자가 보낸 위치를 저장한다. 좌표는 로그에 남기지 않는다."""
+        services: ChatServices = context.bot_data[SERVICES_KEY]
+        message = update.effective_message
+        location = getattr(message, "location", None)
+        if location is None:
+            return
+        notifier = TelegramNotifier(context.bot, update.effective_chat.id)
+        if services.location is None:
+            await notifier.send(OutgoingMessage(LOCATION_OFF))
+            return
+
+        now = services.clock()
+        live_period = getattr(location, "live_period", None)
+        live_until = now + timedelta(seconds=live_period) if live_period else None
+        await services.location.save(location.latitude, location.longitude, now, live_until)
+        logger.info("위치를 갱신했습니다 (실시간 공유: %s)", bool(live_period))
+        # 실시간 공유 중 자동 갱신에는 답하지 않는다
+        if update.edited_message is not None:
+            return
+        await notifier.send(OutgoingMessage(LOCATION_LIVE if live_period else LOCATION_SAVED))
 
     async def on_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query

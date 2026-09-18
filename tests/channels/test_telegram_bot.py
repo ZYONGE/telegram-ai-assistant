@@ -6,12 +6,16 @@ from app.channels.telegram_bot import (
     CANCEL,
     CONFIRM,
     FALLBACK_REPLY,
+    LOCATION_LIVE,
+    LOCATION_OFF,
+    LOCATION_SAVED,
     ChatHandlers,
     ChatServices,
     confirmation_message,
     handle_confirmation,
     parse_callback,
 )
+from app.storage.location import LocationStore
 from app.tools.todos import todo_tools
 from tests.conftest import kst
 
@@ -164,6 +168,75 @@ def test_handlers_only_accept_owner_private_chat():
     application = Application.builder().token("123:abc").build()
     ChatHandlers(allowed_user_id=42).register(application)
     handlers = application.handlers[0]
-    assert [type(h) for h in handlers] == [CommandHandler, MessageHandler, CallbackQueryHandler]
+    assert [type(h) for h in handlers] == [CommandHandler, MessageHandler, MessageHandler, CallbackQueryHandler]
     message_filter = handlers[1].filters
     assert "42" in repr(message_filter) and "private" in repr(message_filter).lower()
+    location_filter = repr(handlers[2].filters)
+    assert "LOCATION" in location_filter.upper() and "42" in location_filter
+
+
+def location_update(latitude=37.5665, longitude=126.9780, live_period=None, edited=False):
+    location = SimpleNamespace(latitude=latitude, longitude=longitude, live_period=live_period)
+    message = SimpleNamespace(location=location)
+    return SimpleNamespace(
+        effective_chat=SimpleNamespace(id=1),
+        effective_message=message,
+        edited_message=message if edited else None,
+    )
+
+
+@pytest.fixture
+def located(services, db):
+    services.location = LocationStore(db)
+    return services
+
+
+async def test_location_is_saved_and_confirmed_once(located):
+    bot = FakeBot()
+    await ChatHandlers(allowed_user_id=1).on_location(location_update(), context_for(bot, located))
+
+    stored = await located.location.latest()
+    assert (round(stored.lat, 4), round(stored.lon, 4)) == (37.5665, 126.978)
+    assert stored.live_until is None
+    assert [text for _, text, _ in bot.sent] == [LOCATION_SAVED]
+
+
+async def test_live_location_sets_end_time_and_says_so(located, clock):
+    located.clock = clock
+    bot = FakeBot()
+    await ChatHandlers(allowed_user_id=1).on_location(
+        location_update(live_period=3600), context_for(bot, located)
+    )
+
+    stored = await located.location.latest()
+    assert (stored.live_until - clock.now).total_seconds() == 3600
+    assert [text for _, text, _ in bot.sent] == [LOCATION_LIVE]
+
+
+async def test_live_updates_are_saved_without_replying(located):
+    bot = FakeBot()
+    handlers = ChatHandlers(allowed_user_id=1)
+    await handlers.on_location(location_update(live_period=3600), context_for(bot, located))
+    await handlers.on_location(
+        location_update(latitude=35.1796, longitude=129.0756, live_period=3600, edited=True),
+        context_for(bot, located),
+    )
+
+    stored = await located.location.latest()
+    assert round(stored.lat, 4) == 35.1796
+    assert len(bot.sent) == 1
+
+
+async def test_location_without_store_is_reported(services):
+    services.location = None
+    bot = FakeBot()
+    await ChatHandlers(allowed_user_id=1).on_location(location_update(), context_for(bot, services))
+    assert [text for _, text, _ in bot.sent] == [LOCATION_OFF]
+
+
+async def test_coordinates_never_appear_in_logs(located, caplog):
+    import logging
+
+    with caplog.at_level(logging.INFO):
+        await ChatHandlers(allowed_user_id=1).on_location(location_update(), context_for(FakeBot(), located))
+    assert "37.5665" not in caplog.text and "126.978" not in caplog.text

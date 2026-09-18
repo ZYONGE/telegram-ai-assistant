@@ -3,6 +3,8 @@ import pytest
 
 from app.collectors.weather import (
     DISABLED_MESSAGE,
+    LIVE_PLACE,
+    NO_LOCATION_MESSAGE,
     KmaWeather,
     WeatherUnavailable,
     base_time,
@@ -13,6 +15,7 @@ from app.collectors.weather import (
 from app.core.config import WeatherSettings
 from app.core.interfaces import BriefingKind
 from app.scheduler.briefing import WeatherBriefing
+from app.storage.location import StoredLocation
 from app.tools.weather import weather_tools
 from tests.conftest import kst
 
@@ -212,3 +215,71 @@ async def test_briefing_skips_when_weather_is_off_or_failing():
     weather, client = weather_with(lambda request: httpx.Response(503, text="down"))
     async with client:
         assert await WeatherBriefing(weather).briefing_items(BriefingKind.MORNING, kst(9, 18, 7)) == []
+
+
+# --- 실시간 위치 따라가기 ---
+
+
+class FakeLocations:
+    def __init__(self, stored: StoredLocation | None = None) -> None:
+        self.stored = stored
+
+    async def latest(self) -> StoredLocation | None:
+        return self.stored
+
+
+def located_weather(stored, handler=ok_handler, **options):
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    settings = WeatherSettings(api_key=KEY, **options)
+    return KmaWeather(settings, client, location=FakeLocations(stored)), client
+
+
+async def test_recent_location_is_used_instead_of_configured_place():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.update(request.url.params)
+        return httpx.Response(200, json=payload(SAMPLE))
+
+    # 부산 좌표를 보냈으면 서울 고정 좌표 대신 그 위치를 본다
+    stored = StoredLocation(35.1796, 129.0756, kst(9, 18, 6))
+    weather, client = located_weather(stored, handler, nx=60, ny=127, place="설정 동네")
+    async with client:
+        forecast = await weather.forecast(kst(9, 18, 7))
+
+    assert (seen["nx"], seen["ny"]) != ("60", "127")
+    assert (int(seen["nx"]), int(seen["ny"])) == to_grid(35.1796, 129.0756)
+    assert forecast.place == LIVE_PLACE
+
+
+async def test_stale_location_falls_back_to_configured_place():
+    stored = StoredLocation(35.1796, 129.0756, kst(9, 16, 7))  # 이틀 전
+    weather, client = located_weather(stored, nx=60, ny=127, place="설정 동네", location_ttl_hours=24)
+    async with client:
+        forecast = await weather.forecast(kst(9, 18, 7))
+    assert forecast.place == "설정 동네"
+
+
+async def test_location_can_be_turned_off():
+    stored = StoredLocation(35.1796, 129.0756, kst(9, 18, 6))
+    weather, client = located_weather(
+        stored, nx=60, ny=127, place="설정 동네", follow_telegram_location=False
+    )
+    async with client:
+        forecast = await weather.forecast(kst(9, 18, 7))
+    assert forecast.place == "설정 동네"
+
+
+async def test_without_any_location_the_user_is_asked_to_send_one():
+    weather, client = located_weather(None)
+    assert weather.enabled is True
+    async with client:
+        with pytest.raises(WeatherUnavailable, match="위치를 보내 주세요"):
+            await weather.forecast(kst(9, 18, 7))
+
+
+async def test_tool_asks_for_location_when_unknown():
+    weather, client = located_weather(None)
+    async with client:
+        result = await weather_tools(weather, clock=lambda: kst(9, 18, 7))[0].run({})
+    assert result.is_error is True and result.content == NO_LOCATION_MESSAGE

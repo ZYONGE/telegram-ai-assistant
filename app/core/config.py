@@ -79,6 +79,10 @@ class WeatherSettings:
     lon: float | None = None
     # 브리핑에 붙일 지역 이름. 비워 두면 표시하지 않는다.
     place: str = ""
+    # 텔레그램으로 보낸 위치를 기준으로 삼는다 (실시간 공유 중에는 자동 갱신)
+    follow_telegram_location: bool = True
+    # 받은 위치를 이 시간까지만 쓴다. 지나면 아래 고정 좌표로 돌아간다.
+    location_ttl_hours: int = 24
 
 
 @dataclass(frozen=True, slots=True)
@@ -234,4 +238,6 @@ def _weather(section: Mapping[str, Any], env: Mapping[str, str]) -> WeatherSetti
         lat=float(section["lat"]) if "lat" in section else None,
         lon=float(section["lon"]) if "lon" in section else None,
         place=str(section.get("place", "")),
+        follow_telegram_location=bool(section.get("follow_telegram_location", True)),
+        location_ttl_hours=int(section.get("location_ttl_hours", 24)),
     )
