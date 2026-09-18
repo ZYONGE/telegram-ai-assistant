@@ -99,6 +99,7 @@ async def test_runtime_registers_every_tool_once(tmp_path):
             "create_reminder", "create_scheduled_task", "list_scheduled_tasks", "pause_scheduled_task",
             "resume_scheduled_task", "cancel_scheduled_task",
             "get_weather", "web_search",
+            "list_events", "find_free_time", "add_event", "update_event", "delete_event",
             "save_link", "save_note", "search_archive", "open_archive_item", "delete_archive_item",
         }
     finally:

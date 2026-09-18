@@ -25,8 +25,16 @@ from app.channels.telegram_bot import SERVICES_KEY, ChatHandlers, ChatServices
 from app.core.clock import KST, utc_now
 from app.core.config import ConfigError, Settings, load_settings
 from app.core.interfaces import BriefingKind
+from app.google.accounts import GoogleAccounts
 from app.llm import LLM, create_llm
-from app.scheduler.briefing import BriefingService, NewsBriefing, TaskBriefing, TodoBriefing, WeatherBriefing
+from app.scheduler.briefing import (
+    BriefingService,
+    CalendarBriefing,
+    NewsBriefing,
+    TaskBriefing,
+    TodoBriefing,
+    WeatherBriefing,
+)
 from app.scheduler.dispatcher import Dispatcher
 from app.scheduler.gate import RuleBasedGate
 from app.scheduler.tasks import TaskService
@@ -38,6 +46,7 @@ from app.storage.notifications import NotificationLog
 from app.storage.tasks import TaskRepository
 from app.storage.todos import TodoRepository
 from app.tools.archive import archive_tools
+from app.tools.calendar import calendar_tools, not_connected_tools
 from app.tools.memory import memory_tools
 from app.tools.registry import ToolRegistry
 from app.tools.search import search_tools
@@ -86,6 +95,8 @@ async def create_runtime(settings: Settings, bot: Bot, llm: LLM | None = None) -
     # 날씨 기준 좌표: 사용자가 텔레그램으로 보낸 최근 위치 → 없으면 설정의 동네
     location = LocationStore(db)
     weather = KmaWeather(settings.weather, http, location=location)
+    # Google 계정은 계정마다 1회 로그인(python -m app.google.login <이름>) 뒤부터 쓸 수 있다
+    google = GoogleAccounts(settings.google, http)
 
     # 이름·호칭은 git에서 제외된 private/profile.md에서 읽는다
     honorific = load_identity(settings.storage.profile_path).honorific
@@ -101,6 +112,7 @@ async def create_runtime(settings: Settings, bot: Bot, llm: LLM | None = None) -
         *weather_tools(weather),
         *search_tools(llm.search),
         *archive_tools(archive, http, light),
+        *(calendar_tools(google) if google.ready else not_connected_tools()),
     )
 
     prompt = PromptBuilder(settings.storage.system_prompt_path, settings.storage.profile_path, memory)
@@ -108,7 +120,13 @@ async def create_runtime(settings: Settings, bot: Bot, llm: LLM | None = None) -
     tasks.set_agent_runner(assistant.run_task)
 
     briefing = BriefingService(
-        [WeatherBriefing(weather), TodoBriefing(todos), TaskBriefing(tasks), NewsBriefing(log)],
+        [
+            WeatherBriefing(weather),
+            CalendarBriefing(google),
+            TodoBriefing(todos),
+            TaskBriefing(tasks),
+            NewsBriefing(log),
+        ],
         dispatcher,
         light,
         honorific,

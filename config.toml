@@ -29,6 +29,22 @@ allow_free_tier = true
 project = ""
 location = "global"
 
+# Google 연동 (캘린더·Gmail). 계정 여러 개를 한 비서가 함께 본다.
+# 데스크톱 앱 OAuth 클라이언트 JSON 하나를 private/google_client.json으로 저장하고,
+# 계정마다 `py -3.14 -m uv run python -m app.google.login <이름>`을 한 번씩 실행한다.
+# 계정 이름은 알림과 일정 표시에 쓰인다. 바꾸고 싶으면 private/local.toml에서 accounts를 통째로 덮어쓴다.
+[google]
+
+[[google.accounts]]
+label = "개인"
+default = true
+
+[[google.accounts]]
+label = "학교"
+
+[[google.accounts]]
+label = "기타"
+
 # 날씨 (기상청 단기예보). 키는 private/.env의 WEATHER_API_KEY에 둔다.
 # 기준 좌표는 (1) 텔레그램으로 보낸 최근 위치, (2) private/local.toml에 적어 둔 동네 순으로 고른다.
 # 좌표는 개인정보라 이 파일에 적지 않는다. 키가 없으면 날씨 기능만 꺼진다.

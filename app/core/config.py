@@ -65,6 +65,31 @@ class LLMSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class GoogleAccountSettings:
+    """연결할 Google 계정 하나. 계정 주소는 저장하지 않고 토큰 파일로만 구분한다."""
+
+    label: str
+    token_file: Path
+    calendar_id: str = "primary"
+    # 새 일정을 넣을 기본 계정
+    default: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class GoogleSettings:
+    """Google 계정 연동(캘린더·Gmail). 클라이언트 파일과 토큰은 private/ 안에만 둔다.
+
+    계정 여러 개를 한 비서가 함께 본다. OAuth 클라이언트 파일 하나를 모든 계정이 공유하고,
+    로그인만 계정 수만큼 한 번씩 한다.
+    """
+
+    client_file: Path = PRIVATE_DIR / "google_client.json"
+    accounts: tuple[GoogleAccountSettings, ...] = ()
+    # 비우면 app/google/auth.py의 기본 범위(캘린더 + gmail.modify)를 쓴다
+    scopes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class WeatherSettings:
     """기상청 단기예보 설정. 키는 private/.env, 동네 좌표는 private/local.toml에 둔다.
 
@@ -109,6 +134,7 @@ class Settings:
     notification: NotificationSettings
     storage: StorageSettings
     llm: LLMSettings = field(default_factory=LLMSettings)
+    google: GoogleSettings = GoogleSettings()
     weather: WeatherSettings = WeatherSettings()
     conversation: ConversationSettings = ConversationSettings()
     briefing: BriefingSettings = BriefingSettings()
@@ -184,6 +210,7 @@ def load_settings(
         notification = data.get("notification", {})
         storage = data["storage"]
         llm = data.get("llm", {})
+        google = data.get("google", {})
         weather = data.get("weather", {})
         conversation = data.get("conversation", {})
         briefing = data.get("briefing", {})
@@ -212,6 +239,7 @@ def load_settings(
                 light_model=llm.get("light_model", l_default.light_model),
                 options=dict(llm.get(provider, {})),
             ),
+            google=_google(google, path),
             weather=_weather(weather, env),
             conversation=ConversationSettings(
                 idle_compact_minutes=int(conversation.get("idle_compact_minutes", c_default.idle_compact_minutes)),
@@ -229,6 +257,33 @@ def load_settings(
 
 def _time(section: Mapping[str, Any], key: str, default: time) -> time:
     return time.fromisoformat(section[key]) if key in section else default
+
+
+def _google(section: Mapping[str, Any], path: Any) -> GoogleSettings:
+    """계정 목록을 읽는다. 목록이 없으면 계정 하나(기본)로 본다."""
+    raw_accounts = section.get("accounts") or [{"label": "기본"}]
+    accounts = []
+    for index, entry in enumerate(raw_accounts, start=1):
+        label = str(entry.get("label", f"계정{index}")).strip() or f"계정{index}"
+        accounts.append(
+            GoogleAccountSettings(
+                label=label,
+                token_file=path(entry.get("token_file", str(PRIVATE_DIR / f"google_token_{index}.json"))),
+                calendar_id=str(entry.get("calendar_id", "primary")),
+                default=bool(entry.get("default", False)),
+            )
+        )
+    if not any(account.default for account in accounts):
+        first = accounts[0]
+        accounts[0] = GoogleAccountSettings(first.label, first.token_file, first.calendar_id, default=True)
+    labels = [account.label for account in accounts]
+    if len(set(labels)) != len(labels):
+        raise ConfigError(f"[[google.accounts]]의 label이 겹칩니다: {labels}")
+    return GoogleSettings(
+        client_file=path(section.get("client_file", str(PRIVATE_DIR / "google_client.json"))),
+        accounts=tuple(accounts),
+        scopes=tuple(section.get("scopes", ())),
+    )
 
 
 def _weather(section: Mapping[str, Any], env: Mapping[str, str]) -> WeatherSettings:

@@ -10,6 +10,8 @@ from typing import Protocol
 
 from app.agent.prompt import DEFAULT_HONORIFIC
 from app.collectors.weather import KmaWeather, WeatherUnavailable
+from app.google.accounts import GoogleAccounts
+from app.google.calendar import overlapping_pairs
 from app.core.clock import KST, format_kst, to_kst
 from app.core.events import Event, EventKind, EventSource
 from app.core.interfaces import BriefingItem, BriefingKind, BriefingProvider, GateAction, GateDecision
@@ -106,6 +108,45 @@ class TaskBriefing:
                 continue
             when = f"{to_kst(next_run):%H:%M}" if section != "다음 주 리마인더" else format_kst(next_run)
             items.append(BriefingItem(section, f"{when} {task.content}", 15))
+        return items
+
+
+class CalendarBriefing:
+    """아침에는 오늘 일정, 저녁에는 내일 일정, 주간 계획에는 다음 주 일정. 겹치는 일정은 따로 알린다."""
+
+    name = "calendar"
+
+    def __init__(self, accounts: GoogleAccounts) -> None:
+        self._accounts = accounts
+
+    async def briefing_items(self, kind: BriefingKind, now: datetime) -> list[BriefingItem]:
+        if not self._accounts.ready:
+            return []
+        today = _day(now)
+        if kind is BriefingKind.MORNING:
+            first, days, section, priority = today, 1, "오늘 일정", 38
+        elif kind is BriefingKind.EVENING:
+            first, days, section, priority = today + timedelta(days=1), 1, "내일 일정", 28
+        else:
+            first, days, section, priority = today + timedelta(days=1), WEEK_DAYS, "다음 주 일정", 26
+
+        start = datetime.combine(first, time(0), tzinfo=KST)
+        result = await self._accounts.events(start, start + timedelta(days=days))
+        show_account = self._accounts.multiple
+        items = [
+            BriefingItem(section, event.render(with_date=days > 1, with_account=show_account), priority)
+            for event in result.events
+        ]
+        for first_event, second_event in overlapping_pairs(result.events):
+            items.append(
+                BriefingItem(
+                    "일정 겹침",
+                    f"{first_event.render(with_account=show_account)} ↔ {second_event.render(with_account=show_account)}",
+                    45,
+                )
+            )
+        if result.failed:
+            items.append(BriefingItem("확인하지 못한 것", f"{', '.join(result.failed)} 계정 일정", 1))
         return items
 
 
