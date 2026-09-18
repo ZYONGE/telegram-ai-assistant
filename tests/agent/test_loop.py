@@ -52,10 +52,10 @@ def roles(call):
 
 
 async def test_plain_reply_uses_config_and_time_prefix(make_assistant, conversation):
-    assistant, chat, _ = make_assistant(gemini_response(text_part("**네**, 사용자님.", signature=b"sig")))
+    assistant, chat, _ = make_assistant(gemini_response(text_part("**네**, 알겠습니다.", signature=b"sig")))
     reply = await assistant.reply("안녕", kst(9, 17, 14))
 
-    assert reply.text == "네, 사용자님."
+    assert reply.text == "네, 알겠습니다."
     call = chat.calls[0]
     assert call["model"] == "chat-model"
     config = call["config"]
@@ -197,7 +197,7 @@ async def test_idle_conversation_is_compacted(make_assistant, conversation):
     assert await conversation.summary() == "- 보고서 마감을 이야기함"
     light_call = light.calls[0]
     assert light_call["model"] == "light-model"
-    assert "사용자님: 보고서 얘기 좀 하자" in light_call["contents"][0]["parts"][0]["text"]
+    assert "사용자: 보고서 얘기 좀 하자" in light_call["contents"][0]["parts"][0]["text"]
     assert light_call["config"].tools is None
 
     await assistant.reply("이어서", kst(9, 17, 15))

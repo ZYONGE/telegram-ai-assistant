@@ -8,6 +8,7 @@ import logging
 from datetime import date, datetime, time, timedelta
 from typing import Protocol
 
+from app.agent.prompt import DEFAULT_HONORIFIC
 from app.core.clock import KST, format_kst, to_kst
 from app.core.events import Event, EventKind, EventSource
 from app.core.interfaces import BriefingItem, BriefingKind, BriefingProvider, GateAction, GateDecision
@@ -109,14 +110,14 @@ class NewsBriefing:
         self._shown = []
 
 
-def compose(kind: BriefingKind, items: list[BriefingItem], now: datetime) -> str:
+def compose(kind: BriefingKind, items: list[BriefingItem], now: datetime, honorific: str = DEFAULT_HONORIFIC) -> str:
     local = to_kst(now)
     today = f"{local.month}월 {local.day}일({_WEEKDAYS[local.weekday()]})"
     if kind is BriefingKind.MORNING:
-        lines = [f"사용자님, 좋은 아침입니다. {today} 브리핑입니다."]
+        lines = [f"{honorific}, 좋은 아침입니다. {today} 브리핑입니다."]
         empty = "오늘 따로 챙길 마감이나 소식은 없습니다."
     else:
-        lines = ["사용자님, 오늘 정리와 내일 준비 사항입니다."]
+        lines = [f"{honorific}, 오늘 정리와 내일 준비 사항입니다."]
         empty = "내일 따로 챙길 일은 없습니다."
     if not items:
         return "\n".join([*lines, empty])
@@ -130,10 +131,17 @@ def compose(kind: BriefingKind, items: list[BriefingItem], now: datetime) -> str
 
 
 class BriefingService:
-    def __init__(self, providers: list[BriefingProvider], dispatcher: Dispatcher, polisher: Polisher | None) -> None:
+    def __init__(
+        self,
+        providers: list[BriefingProvider],
+        dispatcher: Dispatcher,
+        polisher: Polisher | None,
+        honorific: str = DEFAULT_HONORIFIC,
+    ) -> None:
         self._providers = providers
         self._dispatcher = dispatcher
         self._polisher = polisher
+        self._honorific = honorific
 
     async def send(self, kind: BriefingKind, now: datetime) -> GateDecision:
         items: list[BriefingItem] = []
@@ -143,7 +151,7 @@ class BriefingService:
             except Exception:
                 logger.exception("브리핑 항목 수집 실패: %s", provider.name)
 
-        text = compose(kind, items, now)
+        text = compose(kind, items, now, self._honorific)
         if items and self._polisher is not None:
             text = await self._polisher.polish_briefing(kind, text)
 

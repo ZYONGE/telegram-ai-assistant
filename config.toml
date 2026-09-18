@@ -17,7 +17,7 @@ light_model = "gemini-3.5-flash-lite"
 backend = "api_key"
 # 무료 티어는 입력 내용이 제품 개선에 쓰일 수 있다. 프로젝트에 결제 계정을 연결한 뒤 true로 바꾼다.
 billing_enabled = false
-# 결제 연결 전 무료 티어 키로 운영하는 것을 허용한다 (2026-09-18 사용자님 결정, 실행 때마다 경고).
+# 결제 연결 전 무료 티어 키로 운영하는 것을 허용한다 (2026-09-18 사용자 결정, 실행 때마다 경고).
 # 결제를 연결하면 false로 되돌린다.
 allow_free_tier = true
 # vertex일 때만 사용

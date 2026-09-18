@@ -152,6 +152,12 @@ async def test_assistant_failure_sends_fallback(services):
     assert [text for _, text, _ in bot.sent] == [FALLBACK_REPLY]
 
 
+async def test_start_greets_with_configured_honorific(services):
+    bot = FakeBot()
+    await ChatHandlers(allowed_user_id=1, honorific="길동님").on_start(update_for("/start"), context_for(bot, services))
+    assert bot.sent[0][1].startswith("길동님, 비서가 준비되었습니다.")
+
+
 def test_handlers_only_accept_owner_private_chat():
     from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler
 

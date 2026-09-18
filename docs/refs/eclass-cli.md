@@ -32,7 +32,7 @@ eclass-cli는 headless 브라우저로 로그인한 뒤, 같은 브라우저 세
 
 | 용도 | 경로 | 파싱 포인트 |
 |---|---|---|
-| 포털 SSO 로그인 | `https://example.ac.kr/sso/login_stand.jsp` | 입력 `#internalId`, `#internalPw`, 버튼 `#internalLogin`. 성공 판정 URL `**/portal/default/stu**` |
+| 포털 SSO 로그인 | `https://<학교 포털 SSO 호스트>/sso/login_stand.jsp` | 입력 `#internalId`, `#internalPw`, 버튼 `#internalLogin`. 성공 판정 URL `**/portal/default/stu**` |
 | e-Class SSO 진입 | `/ilos/sso/index.jsp` | 성공 판정 URL `**/ilos/main/main_form.acl` |
 | 수강과목 목록 | `/ilos/mp/course_register_list_form.acl` | `.content-container` 단위, `.content-title`(과목명), `.content-author li` 1번째(교수)·2번째(시간), onclick `eclassRoom('KJKEY')` |
 | 할 일 목록 | `POST /ilos/mp/todo_list.acl` (`todoKjList=''`, `chk_cate=ALL`, `encoding=utf-8`) | `.todo_wrap` 단위, `.todo_subjt`(과목), `.todo_title`, `.todo_d_day`, `.todo_date`(마지막 요소가 마감), `input[id^=gubun_]`(유형), `input[id^=kj_]`(과목 키), onclick `goLecture(KJKEY, SEQ, CATEGORY)` |
@@ -81,7 +81,7 @@ eclass-cli는 headless 브라우저로 로그인한 뒤, 같은 브라우저 세
 | 실행 머신의 지역 시간으로 날짜 해석 | `Asia/Seoul`로 명시 해석 후 UTC로 저장 | 서버(OCI)가 UTC면 9시간 틀어진다 |
 | 수집 시점에 "진행중/종료" 상태를 계산해 저장 | 마감 시각 원자료만 저장하고, 상태는 판단 시점에 계산 | 저장된 상태가 금방 낡는다 |
 | 실패하면 예외를 그대로 던짐 | `Event(kind="collector_failed")`로 보고. 실패를 로그인 실패 / 추가 인증·CAPTCHA / 구조 변경 / 네트워크로 구분 | 3절 공통 규칙, 6절 eClass 규칙 |
-| 여러 대학 분기, 서비스마다 기본 URL 하드코딩 | 한국공학대 하나만 지원하고, 기본 URL은 설정 한 곳에 둠 | 범위 축소, 중복 제거 |
+| 여러 대학 분기, 서비스마다 기본 URL 하드코딩 | 사용하는 학교 하나만 지원하고, 학교 주소는 공개 저장소 밖의 로컬 설정에 둠 | 범위 축소, 중복 제거 |
 
 ## eclass-cli에 없어서 6단계에서 직접 조사할 것
 

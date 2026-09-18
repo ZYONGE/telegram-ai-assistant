@@ -28,7 +28,7 @@ def memory_tools(store: MarkdownMemoryStore, clock: Callable[[], datetime] = utc
         SimpleTool(
             spec(
                 "remember",
-                "사용자님에 대한 지속적인 정보(생활 패턴, 목표, 선호, 결정)를 기억에 기록한다. "
+                "사용자에 대한 지속적인 정보(생활 패턴, 목표, 선호, 결정)를 기억에 기록한다. "
                 "일회성 내용, 프로필에 이미 있는 내용, 비밀번호·카드·계좌·신분증 번호는 기록하지 않는다.",
                 {"text": {"type": "string", "description": "한 문장으로 정리한 사실"}},
                 ["text"],
@@ -38,7 +38,7 @@ def memory_tools(store: MarkdownMemoryStore, clock: Callable[[], datetime] = utc
         SimpleTool(
             spec(
                 "forget",
-                "기억 하나를 삭제한다. 사용자님이 지우라고 하면 바로 사용한다.",
+                "기억 하나를 삭제한다. 사용자가 지우라고 하면 바로 사용한다.",
                 {"memory_id": {"type": "string", "description": "기억 ID (예: m-1a2b3c)"}},
                 ["memory_id"],
             ),

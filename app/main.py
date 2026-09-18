@@ -17,7 +17,7 @@ from telegram.ext import Application, ApplicationBuilder
 from app.agent.light import LightModel
 from app.agent.loop import Assistant
 from app.agent.memory import MarkdownMemoryStore
-from app.agent.prompt import PromptBuilder
+from app.agent.prompt import PromptBuilder, load_identity
 from app.channels.telegram import TelegramNotifier
 from app.channels.telegram_bot import SERVICES_KEY, ChatHandlers, ChatServices
 from app.core.clock import KST, utc_now
@@ -73,12 +73,16 @@ async def create_runtime(settings: Settings, bot: Bot, llm: LLM | None = None) -
     memory = MarkdownMemoryStore(settings.storage.memory_path)
     registry.register(*todo_tools(todos), *memory_tools(memory), *task_tools(tasks))
 
-    light = LightModel(llm.light)
+    # 이름·호칭은 git에서 제외된 data/profile.md에서 읽는다
+    honorific = load_identity(settings.storage.profile_path).honorific
+    light = LightModel(llm.light, honorific)
     prompt = PromptBuilder(settings.storage.system_prompt_path, settings.storage.profile_path, memory)
     assistant = Assistant(llm.chat, settings.conversation, prompt, conversation, registry, light)
     tasks.set_agent_runner(assistant.run_task)
 
-    briefing = BriefingService([TodoBriefing(todos), TaskBriefing(tasks), NewsBriefing(log)], dispatcher, light)
+    briefing = BriefingService(
+        [TodoBriefing(todos), TaskBriefing(tasks), NewsBriefing(log)], dispatcher, light, honorific
+    )
     _add_system_jobs(scheduler, settings, dispatcher, assistant, briefing)
     restored = await tasks.start()
     scheduler.start()
@@ -136,7 +140,8 @@ def build_application(settings: Settings) -> Application:
         .post_shutdown(post_shutdown)
         .build()
     )
-    ChatHandlers(settings.telegram.allowed_user_id).register(application)
+    honorific = load_identity(settings.storage.profile_path).honorific
+    ChatHandlers(settings.telegram.allowed_user_id, honorific).register(application)
     return application
 
 

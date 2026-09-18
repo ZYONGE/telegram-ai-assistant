@@ -68,8 +68,8 @@ def task_tools(service: TaskService, clock: Callable[[], datetime] = utc_now) ->
         SimpleTool(
             spec(
                 "create_reminder",
-                "정해진 시각에 사용자님께 알림 메시지를 보내도록 예약한다. run_at(1회)과 cron(반복) 중 하나만 지정한다. "
-                "사용자님이 직접 요청한 알림이므로 밤 시간에도 그대로 발송된다.",
+                "정해진 시각에 사용자에게 알림 메시지를 보내도록 예약한다. run_at(1회)과 cron(반복) 중 하나만 지정한다. "
+                "사용자가 직접 요청한 알림이므로 밤 시간에도 그대로 발송된다.",
                 {"message": {"type": "string", "description": "보낼 알림 문장"}, **_SCHEDULE_PROPS},
                 ["message"],
             ),
@@ -79,7 +79,7 @@ def task_tools(service: TaskService, clock: Callable[[], datetime] = utc_now) ->
             spec(
                 "create_scheduled_task",
                 "정해진 시각에 비서가 처리할 작업을 예약한다 (예: 매일 아침 할 일을 보고 우선순위 제안). "
-                "실행 시 비서가 instruction을 수행하고 결과를 사용자님께 보낸다. 단순 알림은 create_reminder를 쓴다. "
+                "실행 시 비서가 instruction을 수행하고 결과를 사용자에게 보낸다. 단순 알림은 create_reminder를 쓴다. "
                 "반복은 하루 4회 이하만 가능하다.",
                 {"instruction": {"type": "string", "description": "실행 시 비서가 할 일"}, **_SCHEDULE_PROPS},
                 ["instruction"],

@@ -1,6 +1,6 @@
 # 0004. 모델은 Gemini, 호출은 결제 연결 프로젝트로, 제공사는 설정으로 교체
 
-- 상태: 채택 (2026-09-18, 사용자님 결정)
+- 상태: 채택 (2026-09-18, 사용자 결정)
 - 코드: `app/llm/` (`base.py`, `__init__.py`, `gemini.py`), `config.toml`의 `[llm]`
 - 이전 결정: Anthropic SDK(대화 Sonnet급, 문장 다듬기 Haiku급)
 
@@ -19,7 +19,7 @@
 
 ## 현재 운영 상태 (2026-09-18)
 
-- 사용자님이 결제를 연결하지 않은 무료 티어 키로 먼저 운영하기로 했다. `billing_enabled = false`는 사실대로 유지한다.
+- 사용자가 결제를 연결하지 않은 무료 티어 키로 먼저 운영하기로 했다. `billing_enabled = false`는 사실대로 유지한다.
 - 무료 티어는 `allow_free_tier = true`로 명시적으로 허용해야 시작되며, 실행할 때마다 경고를 남긴다. 이 상태에서는 대화·프로필·할 일 내용이 Google 제품 개선에 쓰일 수 있다.
 - 결제를 연결하면 `billing_enabled = true`, `allow_free_tier = false`로 바꿔 B안으로 돌아간다.
 

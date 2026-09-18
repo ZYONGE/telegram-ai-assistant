@@ -103,7 +103,7 @@
 ## 가져올 것
 
 - **기억 계층 분리.** 우리 프로젝트에서는 이렇게 나눈다.
-  - `data/profile.md`: 사용자님이 직접 관리. nanobot의 `USER.md` 역할
+  - `data/profile.md`: 사용자가 직접 관리. nanobot의 `USER.md` 역할
   - 기억 파일: 비서가 대화 중 기록하는 지속 사실. nanobot의 `MEMORY.md` 역할
   - `prompts/system_prompt.md`: 말투·원칙. nanobot의 `SOUL.md` 역할
 - **유휴 압축.** TTL이 지나면 요약 체크포인트로 교체하고, 세션별 잠금을 두고, 다음 대화 때 요약을 주입한다. 원본은 보존한다.

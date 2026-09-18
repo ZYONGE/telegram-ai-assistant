@@ -76,7 +76,7 @@ class ToolRegistry:
             return ToolOutcome(ToolResult(str(exc), is_error=True))
         action = await self._pending.create(tool.spec.name, dict(args), summary, now)
         return ToolOutcome(
-            ToolResult(f"확인 요청을 보냈습니다: {summary}\n사용자님이 [확인]을 누르면 실행됩니다. 아직 실행되지 않았습니다."),
+            ToolResult(f"확인 요청을 보냈습니다: {summary}\n사용자가 [확인]을 누르면 실행됩니다. 아직 실행되지 않았습니다."),
             pending=action,
         )
 

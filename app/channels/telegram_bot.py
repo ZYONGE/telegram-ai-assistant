@@ -10,6 +10,7 @@ from telegram.constants import ChatAction
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
 from app.agent.loop import Assistant
+from app.agent.prompt import DEFAULT_HONORIFIC
 from app.channels.telegram import TelegramNotifier
 from app.core.clock import utc_now
 from app.core.interfaces import Button, OutgoingMessage
@@ -23,7 +24,7 @@ SERVICES_KEY = "services"
 CONFIRM, CANCEL = "confirm", "cancel"
 FALLBACK_REPLY = "지금은 답변을 만들 수 없습니다. 잠시 후 다시 말씀해 주세요."
 ALREADY_HANDLED = "이미 처리된 요청입니다."
-GREETING = "사용자님, 비서가 준비되었습니다. 할 일이나 리마인더를 편하게 말씀해 주세요."
+GREETING = "{honorific}, 비서가 준비되었습니다. 할 일이나 리마인더를 편하게 말씀해 주세요."
 
 
 @dataclass(slots=True)
@@ -70,8 +71,9 @@ async def handle_confirmation(services: ChatServices, verb: str, action_id: str)
 
 
 class ChatHandlers:
-    def __init__(self, allowed_user_id: int) -> None:
+    def __init__(self, allowed_user_id: int, honorific: str = DEFAULT_HONORIFIC) -> None:
         self._allowed_user_id = allowed_user_id
+        self._honorific = honorific
 
     def register(self, application: Application) -> None:
         only_owner = filters.User(user_id=self._allowed_user_id) & filters.ChatType.PRIVATE
@@ -80,7 +82,8 @@ class ChatHandlers:
         application.add_handler(CallbackQueryHandler(self.on_callback))
 
     async def on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await TelegramNotifier(context.bot, update.effective_chat.id).send(OutgoingMessage(GREETING))
+        greeting = GREETING.format(honorific=self._honorific)
+        await TelegramNotifier(context.bot, update.effective_chat.id).send(OutgoingMessage(greeting))
 
     async def on_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         services: ChatServices = context.bot_data[SERVICES_KEY]

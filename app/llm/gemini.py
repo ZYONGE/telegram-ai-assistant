@@ -151,7 +151,7 @@ class GeminiModel:
             if part.get("thought"):
                 continue
             if "text" in part:
-                speaker = "사용자님" if role == "user" else "비서"
+                speaker = "사용자" if role == "user" else "비서"
                 lines.append(f"{speaker}: {part['text']}")
             elif "function_call" in part:
                 call = part["function_call"]

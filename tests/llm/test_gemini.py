@@ -172,7 +172,7 @@ def test_render_truncates_tool_results():
         {"text": "추가해 줘"},
         {"function_response": {"name": "x", "response": {"result": "가" * 500}}},
     ]})
-    assert lines == ["사용자님: 추가해 줘", "도구 결과: " + "가" * 300]
+    assert lines == ["사용자: 추가해 줘", "도구 결과: " + "가" * 300]
     call = model.render("assistant", {"role": "model", "parts": [{"function_call": {"name": "add_todo", "args": {"title": "보고서"}}}]})
     assert call == ['비서 도구 호출: add_todo {"title": "보고서"}']
 

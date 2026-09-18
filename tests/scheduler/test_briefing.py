@@ -118,6 +118,11 @@ async def test_failing_provider_does_not_block_briefing(dispatcher, notifier):
     assert len(notifier.sent) == 1
 
 
+async def test_honorific_comes_from_settings(providers, dispatcher, notifier):
+    await BriefingService(providers, dispatcher, None, honorific="길동님").send(BriefingKind.EVENING, kst(9, 17, 22))
+    assert notifier.sent[0].text.startswith("저녁 브리핑\n길동님, 오늘 정리와 내일 준비 사항입니다.")
+
+
 def test_compose_orders_sections_by_priority():
     items = [BriefingItem("낮음", "a", 1), BriefingItem("높음", "b", 9), BriefingItem("낮음", "c", 1)]
     text = compose(BriefingKind.EVENING, items, kst(9, 17, 22))
