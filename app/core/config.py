@@ -1,6 +1,8 @@
-"""설정 로드: config.toml + .env.
+"""설정 로드: config.toml + private/local.toml + private/.env.
 
-비밀값은 config.toml에 직접 쓰지 않고 `${ENV_VAR}`로만 참조한다.
+개인정보와 비밀값은 git에서 제외된 `private/` 폴더 하나에만 둔다.
+- 비밀값은 config.toml에 직접 쓰지 않고 `${ENV_VAR}`로만 참조한다 (값은 private/.env).
+- 개인을 알아볼 수 있는 설정값(지역, 주소 등)은 private/local.toml에 두고, 있으면 config.toml 위에 덮어쓴다.
 참조한 환경변수가 없으면 빠진 것을 모두 모아 한 번에 알린다 (값은 메시지에 넣지 않는다).
 """
 
@@ -16,6 +18,11 @@ from typing import Any
 from dotenv import load_dotenv
 
 _ENV_REF = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+# 개인정보·비밀값이 모이는 폴더 (git 제외). 경로는 config.toml 위치 기준이다.
+PRIVATE_DIR = Path("private")
+ENV_FILE = PRIVATE_DIR / ".env"
+LOCAL_CONFIG = PRIVATE_DIR / "local.toml"
 
 
 class ConfigError(Exception):
@@ -106,21 +113,41 @@ def resolve_env_refs(data: Any, env: Mapping[str, str]) -> Any:
     return resolved
 
 
+def merge_settings(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str, Any]:
+    """override에 있는 항목만 base 위에 덮어쓴다 (표 안쪽까지)."""
+    merged = dict(base)
+    for key, value in override.items():
+        current = merged.get(key)
+        if isinstance(current, Mapping) and isinstance(value, Mapping):
+            merged[key] = merge_settings(current, value)
+        else:
+            merged[key] = value
+    return merged
+
+
 def load_settings(
     config_path: Path = Path("config.toml"),
-    env_file: Path = Path(".env"),
+    env_file: Path | None = None,
     env: Mapping[str, str] | None = None,
+    local_path: Path | None = None,
 ) -> Settings:
+    base = config_path.parent
     if env is None:
-        load_dotenv(env_file, override=False)
+        load_dotenv(env_file or base / ENV_FILE, override=False)
         env = os.environ
     try:
         raw = tomllib.loads(config_path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
         raise ConfigError(f"설정 파일이 없습니다: {config_path}") from exc
 
+    local = local_path if local_path is not None else base / LOCAL_CONFIG
+    if local.exists():
+        try:
+            raw = merge_settings(raw, tomllib.loads(local.read_text(encoding="utf-8")))
+        except tomllib.TOMLDecodeError as exc:
+            raise ConfigError(f"개인 설정 파일 형식이 잘못되었습니다: {local} ({exc})") from exc
+
     data = resolve_env_refs(raw, env)
-    base = config_path.parent
 
     def path(value: str) -> Path:
         candidate = Path(value)
@@ -148,8 +175,8 @@ def load_settings(
             ),
             storage=StorageSettings(
                 db_path=path(storage["db_path"]),
-                memory_path=path(storage.get("memory_path", "data/memory.md")),
-                profile_path=path(storage.get("profile_path", "data/profile.md")),
+                memory_path=path(storage.get("memory_path", str(PRIVATE_DIR / "memory.md"))),
+                profile_path=path(storage.get("profile_path", str(PRIVATE_DIR / "profile.md"))),
                 system_prompt_path=path(storage.get("system_prompt_path", "prompts/system_prompt.md")),
             ),
             llm=LLMSettings(

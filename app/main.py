@@ -73,7 +73,7 @@ async def create_runtime(settings: Settings, bot: Bot, llm: LLM | None = None) -
     memory = MarkdownMemoryStore(settings.storage.memory_path)
     registry.register(*todo_tools(todos), *memory_tools(memory), *task_tools(tasks))
 
-    # 이름·호칭은 git에서 제외된 data/profile.md에서 읽는다
+    # 이름·호칭은 git에서 제외된 private/profile.md에서 읽는다
     honorific = load_identity(settings.storage.profile_path).honorific
     light = LightModel(llm.light, honorific)
     prompt = PromptBuilder(settings.storage.system_prompt_path, settings.storage.profile_path, memory)
@@ -159,7 +159,7 @@ def main() -> None:
         raise SystemExit(1) from None
     except InvalidToken:
         # 이 예외의 메시지에는 토큰 원문이 들어 있어서 그대로 출력하지 않는다
-        logger.error("텔레그램이 봇 토큰을 거부했습니다. .env의 TELEGRAM_BOT_TOKEN을 확인하세요.")
+        logger.error("텔레그램이 봇 토큰을 거부했습니다. private/.env의 TELEGRAM_BOT_TOKEN을 확인하세요.")
         raise SystemExit(1) from None
 
 

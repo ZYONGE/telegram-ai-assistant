@@ -67,10 +67,10 @@ def _create_client(options: dict[str, Any], client_factory: Callable[..., Any]) 
                 "결제를 연결하면 billing_enabled = true, allow_free_tier = false로 바꾸세요."
             )
         try:
-            # API 키는 SDK가 환경변수 GEMINI_API_KEY에서 읽는다 (.env는 load_settings가 불러 둠)
+            # API 키는 SDK가 환경변수 GEMINI_API_KEY에서 읽는다 (private/.env는 load_settings가 불러 둠)
             return client_factory(vertexai=False)
         except ValueError:
-            raise ConfigError("GEMINI_API_KEY가 설정되지 않았습니다. .env에 추가하세요.") from None
+            raise ConfigError("GEMINI_API_KEY가 설정되지 않았습니다. private/.env에 추가하세요.") from None
     if backend == "vertex":
         project = options.get("project")
         if not project:
@@ -79,7 +79,7 @@ def _create_client(options: dict[str, Any], client_factory: Callable[..., Any]) 
             return client_factory(vertexai=True, project=project, location=options.get("location", "global"))
         except (DefaultCredentialsError, ValueError):
             raise ConfigError(
-                "Vertex AI 인증 정보를 찾지 못했습니다. .env의 GOOGLE_APPLICATION_CREDENTIALS를 확인하세요."
+                "Vertex AI 인증 정보를 찾지 못했습니다. private/.env의 GOOGLE_APPLICATION_CREDENTIALS를 확인하세요."
             ) from None
     raise ConfigError(f"[llm.gemini] backend는 {BACKENDS} 중 하나여야 합니다: {backend!r}")
 

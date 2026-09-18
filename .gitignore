@@ -1,13 +1,12 @@
-# 참고 오픈소스 클론 (읽기 전용). docs/refs/ 메모는 추적해야 하므로 루트에만 적용
-/refs/
+# 개인정보와 비밀값은 이 폴더 하나에만 둔다 (.env, profile.md, local.toml, DB, 기억 파일, 브라우저 세션)
+/private/
 
-# 런타임 데이터: DB, 기억 파일, profile.md, 브라우저 세션
-/data/
-
-# 비밀값
+# 어디에 있든 비밀값 파일은 올리지 않는다 (private/.env 포함)
 .env
 .env.*
-!.env.example
+
+# 참고 오픈소스 클론 (읽기 전용). docs/refs/ 메모는 추적해야 하므로 루트에만 적용
+/refs/
 
 # Python
 __pycache__/

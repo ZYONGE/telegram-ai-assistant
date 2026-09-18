@@ -38,9 +38,9 @@
 | 연동 | 상태 | 예정 | 준비할 것 |
 |---|---|---|---|
 | Google Calendar | 미구현 | 5단계 | Google Cloud 프로젝트에서 Calendar API 사용 설정, OAuth 클라이언트(데스크톱 앱) 파일, 최초 1회 브라우저 로그인 |
-| Gmail | 미구현 (Inbox Zero 설계 분석 완료) | 5단계 | Gmail API 사용 설정(같은 OAuth, `gmail.modify` 범위), 메일 유형 규칙·교수님 명단·보호 도메인 입력(`data/profile.md`) |
-| eClass | 미구현 (eclass-cli 흐름 분석 완료) | 6단계 | `.env`에 학교 포털 계정, 학교 포털·eClass 주소(로컬 설정), Playwright 브라우저 설치 |
-| 날씨 (기상청 단기예보) | 미구현 | 4단계 | 공공데이터포털 API 키(`.env`), 동네 좌표 |
+| Gmail | 미구현 (Inbox Zero 설계 분석 완료) | 5단계 | Gmail API 사용 설정(같은 OAuth, `gmail.modify` 범위), 메일 유형 규칙·교수님 명단·보호 도메인 입력(`private/profile.md`) |
+| eClass | 미구현 (eclass-cli 흐름 분석 완료) | 6단계 | `private/.env`에 학교 포털 계정, 학교 포털·eClass 주소(로컬 설정), Playwright 브라우저 설치 |
+| 날씨 (기상청 단기예보) | 미구현 | 4단계 | 공공데이터포털 API 키(`private/.env`), 동네 좌표 |
 | 웹 검색 | 미구현 | 4단계 | 검색 방식 결정 (별도 검색 API 또는 Gemini 검색 기능) |
 | 채용 페이지·교환학생 공지 | 미구현 | 7단계 | 감시할 페이지 목록 |
 
@@ -48,8 +48,13 @@
 
 - 실행: `py -3.14 -m uv run python -m app.main` (종료는 Ctrl+C)
 - 테스트: `py -3.14 -m uv run pytest`
-- 설정: `config.toml` (공개). 비밀값은 `.env`(git 제외, 양식은 `.env.example`)
-- 로컬 데이터 (`data/`, git 제외): `assistant.db`(할 일·알림·예약·대화), `memory.md`(비서 기억), `profile.md`(사용자가 직접 작성, 이름·호칭도 여기서 읽음)
+- 설정: `config.toml` (공개, 개인정보 없음). 개인 설정 덮어쓰기는 `private/local.toml`
+- 개인 폴더 `private/` (git 제외, 개인정보와 비밀값은 전부 여기에만 둔다)
+  - `.env`: 봇 토큰, 모델 키 등 비밀값
+  - `profile.md`: 이름·호칭·학교·시간표 등 사용자가 직접 작성 (호칭도 여기서 읽는다)
+  - `local.toml`: 지역·주소처럼 개인을 알아볼 수 있는 설정값 (없어도 된다)
+  - `assistant.db`: 할 일·알림·예약·대화, `memory.md`: 비서 기억
+- 빈 양식은 `templates/`에 있다 (`env.example`, `profile.example.md`, `local.example.toml`). 새 컴퓨터에서는 이 세 개를 `private/`로 복사해 채운다.
 - 모델 호출 경로: 현재 **결제 미연결 무료 티어 키**로 운영 중 (`[llm.gemini] billing_enabled = false`, `allow_free_tier = true`). 무료 티어에서는 입력 내용이 Google 제품 개선에 쓰일 수 있다. 결제를 연결하면 두 값을 `true` / `false`로 바꿔 B안으로 돌아간다.
 
 ## 5. 다음 작업
@@ -99,8 +104,9 @@
 
 ## 7. 개인정보 관리
 
-- 저장소는 공개 상태다. 이름·호칭·학교·연락처·계정 정보와 모든 키는 `data/`와 `.env`에만 두며, 둘 다 git에서 제외된다.
-- 코드와 프롬프트는 호칭을 `data/profile.md`에서 실행할 때 읽는다.
+- 저장소는 공개 상태다. 개인을 알아볼 수 있는 값과 모든 키는 `private/` 폴더 한 곳에만 두고, 이 폴더는 통째로 git에서 제외된다 (2026-09-18 정리).
+- 저장소에 올라가는 파일에는 "사용자", `{honorific}`, 예시 값 같은 범용 표현만 쓴다. 코드와 프롬프트는 호칭을 실행할 때 `private/profile.md`에서 읽는다.
+- 앞으로 생기는 개인 파일(구글 OAuth 토큰, eClass 세션, 서비스 계정 키 등)도 모두 `private/` 안에 만든다.
 - 2026-09-18 정리 이전의 커밋 기록에는 이름·학교 정보가 남아 있다. 지우려면 기록을 다시 쓰고 강제 푸시하거나, 저장소를 비공개로 바꿔야 한다 (사용자 결정 필요).
 
 ## 8. 개발 환경 메모 (Windows 개발 PC)

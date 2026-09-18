@@ -1,4 +1,7 @@
-# 비밀값은 여기에 직접 쓰지 않는다. .env에 두고 ${이름}으로 참조한다.
+# 이 파일은 git에 올라간다. 개인정보와 비밀값을 여기에 쓰지 않는다.
+# - 비밀값: private/.env에 두고 ${이름}으로 참조한다.
+# - 개인을 알아볼 수 있는 값(지역, 학교 주소 등): private/local.toml에 두면 이 파일 위에 덮어쓴다
+#   (양식: templates/local.example.toml).
 
 [telegram]
 bot_token = "${TELEGRAM_BOT_TOKEN}"
@@ -12,8 +15,8 @@ light_model = "gemini-3.5-flash-lite"
 
 # Gemini 모델 ID 목록: https://ai.google.dev/gemini-api/docs/models
 [llm.gemini]
-# api_key: Cloud 결제 계정을 연결한 Google Cloud 프로젝트의 Gemini API 키 (.env의 GEMINI_API_KEY)
-# vertex : 같은 프로젝트의 Vertex AI (.env의 GOOGLE_APPLICATION_CREDENTIALS, 아래 project 필요)
+# api_key: Cloud 결제 계정을 연결한 Google Cloud 프로젝트의 Gemini API 키 (private/.env의 GEMINI_API_KEY)
+# vertex : 같은 프로젝트의 Vertex AI (private/.env의 GOOGLE_APPLICATION_CREDENTIALS, 아래 project 필요)
 backend = "api_key"
 # 무료 티어는 입력 내용이 제품 개선에 쓰일 수 있다. 프로젝트에 결제 계정을 연결한 뒤 true로 바꾼다.
 billing_enabled = false
@@ -37,8 +40,9 @@ evening = "22:00"
 idle_compact_minutes = 30
 max_active_messages = 80
 
+# 개인 데이터는 private/ 폴더 하나에 모은다 (git 제외)
 [storage]
-db_path = "data/assistant.db"
-memory_path = "data/memory.md"
-profile_path = "data/profile.md"
+db_path = "private/assistant.db"
+memory_path = "private/memory.md"
+profile_path = "private/profile.md"
 system_prompt_path = "prompts/system_prompt.md"

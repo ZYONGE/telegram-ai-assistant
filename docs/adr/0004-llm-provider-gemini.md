@@ -33,5 +33,5 @@
 ## 영향
 
 - 의존성: `anthropic` 제거, `google-genai`(Apache-2.0) 추가.
-- `.env`: `ANTHROPIC_API_KEY` 대신 `GEMINI_API_KEY`.
+- `private/.env`: `ANTHROPIC_API_KEY` 대신 `GEMINI_API_KEY`.
 - ADR 0001·0003의 "가벼운 모델"은 이제 `[llm] light_model`이다.

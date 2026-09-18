@@ -102,7 +102,7 @@ class MemoryItem:
 
 @runtime_checkable
 class MemoryStore(Protocol):
-    """비서가 대화 중 기록하는 지속 정보. 사용자가 직접 관리하는 data/profile.md와는 별개다."""
+    """비서가 대화 중 기록하는 지속 정보. 사용자가 직접 관리하는 private/profile.md와는 별개다."""
 
     async def read(self) -> list[MemoryItem]: ...
 
