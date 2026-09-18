@@ -129,6 +129,64 @@ MIGRATIONS: list[str] = [
         live_until  TEXT
     );
     """,
+    """
+    -- 사용자가 등록한 메일 유형. 매칭은 코드가 하고, 모델은 이 목록 밖으로 나가지 않는다.
+    CREATE TABLE mail_rules (
+        id          INTEGER PRIMARY KEY,
+        name        TEXT NOT NULL,
+        kind        TEXT NOT NULL CHECK (kind IN ('payment', 'professor', 'company', 'ad', 'other')),
+        senders     TEXT NOT NULL DEFAULT '[]',
+        domains     TEXT NOT NULL DEFAULT '[]',
+        keywords    TEXT NOT NULL DEFAULT '[]',
+        account     TEXT NOT NULL DEFAULT '',
+        enabled     INTEGER NOT NULL DEFAULT 1,
+        created_at  TEXT NOT NULL
+    );
+
+    -- 계정별 수집 커서
+    CREATE TABLE mail_state (
+        account     TEXT PRIMARY KEY,
+        history_id  TEXT,
+        checked_at  TEXT
+    );
+
+    -- 이미 처리한 메일 (중복 방지 + 브리핑 목록). 본문은 저장하지 않는다.
+    CREATE TABLE mail_seen (
+        account     TEXT NOT NULL,
+        message_id  TEXT NOT NULL,
+        kind        TEXT NOT NULL,
+        subject     TEXT NOT NULL DEFAULT '',
+        seen_at     TEXT NOT NULL,
+        briefed     INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (account, message_id)
+    );
+
+    -- 규칙 엔진이 휴지통으로 보낸 내역 ([되돌리기] 대상)
+    CREATE TABLE mail_cleanup (
+        id          INTEGER PRIMARY KEY,
+        account     TEXT NOT NULL,
+        message_id  TEXT NOT NULL,
+        subject     TEXT NOT NULL DEFAULT '',
+        sender      TEXT NOT NULL DEFAULT '',
+        done_at     TEXT NOT NULL,
+        undone_at   TEXT
+    );
+
+    -- 답변 대기. 사용자가 그 스레드에 답장하면 자동으로 풀린다.
+    CREATE TABLE reply_waiting (
+        id           INTEGER PRIMARY KEY,
+        account      TEXT NOT NULL,
+        thread_id    TEXT NOT NULL,
+        message_id   TEXT NOT NULL DEFAULT '',
+        subject      TEXT NOT NULL DEFAULT '',
+        sender       TEXT NOT NULL DEFAULT '',
+        created_at   TEXT NOT NULL,
+        due_at       TEXT,
+        resolved_at  TEXT,
+        reminded_at  TEXT,
+        UNIQUE (account, thread_id)
+    );
+    """,
 ]
 
 

@@ -5,7 +5,7 @@ from datetime import datetime
 
 from app.core.clock import format_kst
 from app.core.events import Event
-from app.core.interfaces import GateAction, GateDecision, NotificationGate, Notifier, OutgoingMessage
+from app.core.interfaces import Button, GateAction, GateDecision, NotificationGate, Notifier, OutgoingMessage
 from app.storage.notifications import NotificationLog
 
 logger = logging.getLogger(__name__)
@@ -48,4 +48,10 @@ def render_event(event: Event) -> OutgoingMessage:
         lines.append(event.body)
     if event.due_at is not None:
         lines.append(f"마감: {format_kst(event.due_at)}")
-    return OutgoingMessage("\n".join(lines))
+    # meta에 버튼이 있으면 함께 보낸다 (예: 저녁 브리핑의 메일 정리 되돌리기)
+    buttons = tuple(
+        Button(str(item["label"]), str(item["data"]))
+        for item in event.meta.get("buttons", [])
+        if isinstance(item, dict) and item.get("label") and item.get("data")
+    )
+    return OutgoingMessage("\n".join(lines), buttons=buttons)

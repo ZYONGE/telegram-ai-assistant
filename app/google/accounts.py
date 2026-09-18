@@ -16,6 +16,7 @@ from app.core.clock import utc_now
 from app.core.config import GoogleSettings
 from app.google.auth import GoogleApiError, GoogleAuth, GoogleAuthError
 from app.google.calendar import CalendarClient, CalendarEvent
+from app.google.gmail import GmailClient
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,7 @@ class GoogleAccount:
     label: str
     auth: GoogleAuth
     calendar: CalendarClient
+    gmail: GmailClient
     default: bool = False
 
     @property
@@ -53,6 +55,7 @@ class GoogleAccounts:
                 label=account.label,
                 auth=(auth := GoogleAuth(settings.client_file, account.token_file, http, clock=clock)),
                 calendar=CalendarClient(auth, http, account.calendar_id),
+                gmail=GmailClient(auth, http),
                 default=account.default,
             )
             for account in settings.accounts

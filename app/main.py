@@ -20,16 +20,19 @@ from app.agent.loop import Assistant
 from app.agent.memory import MarkdownMemoryStore
 from app.agent.prompt import PromptBuilder, load_identity
 from app.channels.telegram import TelegramNotifier
+from app.collectors.mail import MailCollector
 from app.collectors.weather import KmaWeather
 from app.channels.telegram_bot import SERVICES_KEY, ChatHandlers, ChatServices
 from app.core.clock import KST, utc_now
 from app.core.config import ConfigError, Settings, load_settings
 from app.core.interfaces import BriefingKind
 from app.google.accounts import GoogleAccounts
+from app.mail.service import MailService
 from app.llm import LLM, create_llm
 from app.scheduler.briefing import (
     BriefingService,
     CalendarBriefing,
+    MailBriefing,
     NewsBriefing,
     TaskBriefing,
     TodoBriefing,
@@ -37,16 +40,19 @@ from app.scheduler.briefing import (
 )
 from app.scheduler.dispatcher import Dispatcher
 from app.scheduler.gate import RuleBasedGate
+from app.scheduler.ingest import Ingestor
 from app.scheduler.tasks import TaskService
 from app.storage.archive import ArchiveRepository
 from app.storage.conversation import ConversationStore, PendingActionStore
 from app.storage.location import LocationStore
+from app.storage.mail import MailCleanupLog, MailRuleRepository, MailStateStore, WaitingReplyStore
 from app.storage.db import Database
 from app.storage.notifications import NotificationLog
 from app.storage.tasks import TaskRepository
 from app.storage.todos import TodoRepository
 from app.tools.archive import archive_tools
 from app.tools.calendar import calendar_tools, not_connected_tools
+from app.tools.mail import mail_tools, not_connected_mail_tools
 from app.tools.memory import memory_tools
 from app.tools.registry import ToolRegistry
 from app.tools.search import search_tools
@@ -97,6 +103,11 @@ async def create_runtime(settings: Settings, bot: Bot, llm: LLM | None = None) -
     weather = KmaWeather(settings.weather, http, location=location)
     # Google 계정은 계정마다 1회 로그인(python -m app.google.login <이름>) 뒤부터 쓸 수 있다
     google = GoogleAccounts(settings.google, http)
+    mail_rules = MailRuleRepository(db)
+    mail_state = MailStateStore(db)
+    mail_cleanup = MailCleanupLog(db)
+    waiting_replies = WaitingReplyStore(db)
+    mail = MailService(google, mail_cleanup, waiting_replies, mail_state)
 
     # 이름·호칭은 git에서 제외된 private/profile.md에서 읽는다
     honorific = load_identity(settings.storage.profile_path).honorific
@@ -113,6 +124,7 @@ async def create_runtime(settings: Settings, bot: Bot, llm: LLM | None = None) -
         *search_tools(llm.search),
         *archive_tools(archive, http, light),
         *(calendar_tools(google) if google.ready else not_connected_tools()),
+        *(mail_tools(google, mail_rules, mail) if google.ready else not_connected_mail_tools()),
     )
 
     prompt = PromptBuilder(settings.storage.system_prompt_path, settings.storage.profile_path, memory)
@@ -123,6 +135,7 @@ async def create_runtime(settings: Settings, bot: Bot, llm: LLM | None = None) -
         [
             WeatherBriefing(weather),
             CalendarBriefing(google),
+            MailBriefing(mail),
             TodoBriefing(todos),
             TaskBriefing(tasks),
             NewsBriefing(log),
@@ -131,12 +144,23 @@ async def create_runtime(settings: Settings, bot: Bot, llm: LLM | None = None) -
         light,
         honorific,
     )
+    mail_collector = MailCollector(
+        google,
+        mail_rules,
+        mail_state,
+        mail_cleanup,
+        waiting_replies,
+        frozenset(settings.mail.protected_domains),
+    )
+    ingestor = Ingestor(todos, dispatcher)
     _add_system_jobs(scheduler, settings, dispatcher, assistant, briefing)
+    _add_collector_jobs(scheduler, settings, ingestor, mail_collector, google)
     restored = await tasks.start()
     scheduler.start()
     logger.info("예약 작업 %d건 복원, 스케줄러 시작", restored)
 
-    return Runtime(db, scheduler, llm, ChatServices(assistant, registry, conversation, location=location), http)
+    services = ChatServices(assistant, registry, conversation, location=location, mail=mail)
+    return Runtime(db, scheduler, llm, services, http)
 
 
 def _add_system_jobs(
@@ -175,6 +199,36 @@ def _add_system_jobs(
         CronTrigger(day_of_week="sun", hour=weekly.hour, minute=weekly.minute, timezone=KST),
         id="system:briefing:weekly", coalesce=True, max_instances=1, misfire_grace_time=1800,
     )
+
+
+def _add_collector_jobs(
+    scheduler: AsyncIOScheduler,
+    settings: Settings,
+    ingestor: Ingestor,
+    mail_collector: MailCollector,
+    google: GoogleAccounts,
+) -> None:
+    """수집기 주기 작업. 조용한 시간에는 돌리지 않는다 (알림도 어차피 보류된다)."""
+    minutes = settings.mail.poll_minutes
+    if minutes <= 0 or not google.ready:
+        logger.info("메일 수집을 켜지 않았습니다 (설정 %d분, 계정 연결 %s)", minutes, google.ready)
+        return
+
+    async def collect_mail() -> None:
+        try:
+            await ingestor.run_collector(mail_collector, utc_now())
+        except Exception:
+            logger.exception("메일 수집 실패")
+
+    start, end = settings.notification.quiet_end, settings.notification.quiet_start
+    scheduler.add_job(
+        collect_mail,
+        CronTrigger(minute=f"*/{minutes}", hour=f"{start.hour}-{end.hour}", timezone=KST),
+        id="collector:mail",
+        coalesce=True,
+        max_instances=1,
+    )
+    logger.info("메일 수집: %d분마다 (%02d시~%02d시)", minutes, start.hour, end.hour)
 
 
 def build_application(settings: Settings) -> Application:

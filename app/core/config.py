@@ -90,6 +90,16 @@ class GoogleSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class MailSettings:
+    """메일 수집 주기와 보호 도메인. 학교 도메인처럼 개인을 알아볼 수 있는 값은 private/local.toml에 둔다."""
+
+    # 수집 간격(분). 0이면 메일 수집을 하지 않는다.
+    poll_minutes: int = 10
+    # 이 도메인에서 온 메일은 어떤 규칙에서도 휴지통으로 보내지 않는다
+    protected_domains: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class WeatherSettings:
     """기상청 단기예보 설정. 키는 private/.env, 동네 좌표는 private/local.toml에 둔다.
 
@@ -135,6 +145,7 @@ class Settings:
     storage: StorageSettings
     llm: LLMSettings = field(default_factory=LLMSettings)
     google: GoogleSettings = GoogleSettings()
+    mail: MailSettings = MailSettings()
     weather: WeatherSettings = WeatherSettings()
     conversation: ConversationSettings = ConversationSettings()
     briefing: BriefingSettings = BriefingSettings()
@@ -211,6 +222,7 @@ def load_settings(
         storage = data["storage"]
         llm = data.get("llm", {})
         google = data.get("google", {})
+        mail = data.get("mail", {})
         weather = data.get("weather", {})
         conversation = data.get("conversation", {})
         briefing = data.get("briefing", {})
@@ -240,6 +252,10 @@ def load_settings(
                 options=dict(llm.get(provider, {})),
             ),
             google=_google(google, path),
+            mail=MailSettings(
+                poll_minutes=int(mail.get("poll_minutes", 10)),
+                protected_domains=tuple(str(item).lower() for item in mail.get("protected_domains", ())),
+            ),
             weather=_weather(weather, env),
             conversation=ConversationSettings(
                 idle_compact_minutes=int(conversation.get("idle_compact_minutes", c_default.idle_compact_minutes)),

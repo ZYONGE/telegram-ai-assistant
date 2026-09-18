@@ -15,6 +15,7 @@ from app.google.calendar import overlapping_pairs
 from app.core.clock import KST, format_kst, to_kst
 from app.core.events import Event, EventKind, EventSource
 from app.core.interfaces import BriefingItem, BriefingKind, BriefingProvider, GateAction, GateDecision
+from app.mail.service import MailService, undo_data
 from app.scheduler.dispatcher import Dispatcher
 from app.scheduler.tasks import TaskService
 from app.storage.notifications import NotificationLog
@@ -178,6 +179,57 @@ class WeatherBriefing:
         return [BriefingItem("내일 날씨", forecast.render(), 9)]
 
 
+class MailBriefing:
+    """아침에는 그 외 메일 목록, 저녁에는 정리 내역과 답변 대기 상기.
+
+    유형별 즉시 알림은 수집기가 이벤트로 보내고, 여기서는 묶어서 보여 줄 것만 맡는다.
+    """
+
+    name = "mail"
+
+    def __init__(self, service: MailService) -> None:
+        self._service = service
+        self._listed = False
+        self._reminded: list = []
+
+    async def briefing_items(self, kind: BriefingKind, now: datetime) -> list[BriefingItem]:
+        if kind is BriefingKind.WEEKLY:
+            return []
+        items: list[BriefingItem] = []
+        if kind is BriefingKind.MORNING:
+            pending = await self._service.morning_list()
+            self._listed = bool(pending)
+            items += [
+                BriefingItem("새 메일", f"[{account}] {subject}" if account else subject, 14)
+                for account, subject in pending
+            ]
+        else:
+            cleaned = await self._service.cleaned_today(now)
+            if cleaned:
+                titles = ", ".join(record.subject[:20] for record in cleaned[:3])
+                items.append(BriefingItem("메일 정리", f"{len(cleaned)}건을 휴지통으로 옮겼습니다: {titles}", 6))
+
+        overdue = await self._service.overdue_waiting(now)
+        self._reminded = overdue
+        items += [
+            BriefingItem("답장이 아직 안 나간 메일", f"{item.sender} — {item.subject[:40]}", 18) for item in overdue
+        ]
+        return items
+
+    async def briefing_buttons(self, kind: BriefingKind, now: datetime) -> list[dict]:
+        if kind is BriefingKind.EVENING and await self._service.cleaned_today(now):
+            return [{"label": "메일 정리 되돌리기", "data": undo_data(now)}]
+        return []
+
+    async def acknowledge(self, now: datetime) -> None:
+        if self._listed:
+            await self._service.mark_morning_listed()
+            self._listed = False
+        if self._reminded:
+            await self._service.mark_reminded(self._reminded, now)
+            self._reminded = []
+
+
 class NewsBriefing:
     """게이트가 브리핑으로 미룬 소식. 브리핑을 보낸 뒤 acknowledge()로 표시해 다음에는 빼낸다."""
 
@@ -254,12 +306,22 @@ class BriefingService:
         if items and self._polisher is not None:
             text = await self._polisher.polish_briefing(kind, text)
 
+        buttons: list[dict] = []
+        for provider in self._providers:
+            make_buttons = getattr(provider, "briefing_buttons", None)
+            if make_buttons is not None:
+                try:
+                    buttons += await make_buttons(kind, now)
+                except Exception:
+                    logger.exception("브리핑 버튼 수집 실패: %s", provider.name)
+
         event = Event(
             source=EventSource.SCHEDULER,
             kind=EventKind.BRIEFING,
             title=TITLES[kind],
             body=text,
             ref_id=f"briefing:{kind}:{to_kst(now):%Y%m%d}",
+            meta={"buttons": buttons} if buttons else {},
         )
         decision = await self._dispatcher.publish(event, now)
         if decision.action is GateAction.SEND_NOW:

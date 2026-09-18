@@ -100,6 +100,8 @@ async def test_runtime_registers_every_tool_once(tmp_path):
             "resume_scheduled_task", "cancel_scheduled_task",
             "get_weather", "web_search",
             "list_events", "find_free_time", "add_event", "update_event", "delete_event",
+            "list_mail_rules", "add_mail_rule", "delete_mail_rule",
+            "list_waiting_replies", "resolve_waiting_reply", "draft_reply", "list_recent_mail",
             "save_link", "save_note", "search_archive", "open_archive_item", "delete_archive_item",
         }
     finally:

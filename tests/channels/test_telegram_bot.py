@@ -8,6 +8,7 @@ from app.channels.telegram_bot import (
     FALLBACK_REPLY,
     LOCATION_HIDDEN,
     LOCATION_LIVE,
+    UNDO_NOTHING,
     LOCATION_OFF,
     LOCATION_SAVED,
     ChatHandlers,
@@ -289,3 +290,49 @@ async def test_saved_location_reply_keeps_the_button(located):
     bot = FakeBot()
     await ChatHandlers(allowed_user_id=1).on_location(location_update(), context_for(bot, located))
     assert bot.sent[0][2].keyboard[0][0].request_location is True
+
+
+class FakeMailService:
+    def __init__(self, restored=2, failed=0) -> None:
+        self.result = (restored, failed)
+        self.calls: list = []
+
+    async def undo_cleanup(self, day_start):
+        self.calls.append(day_start)
+        return self.result
+
+
+def callback_update(data: str, user_id: int = 1):
+    return SimpleNamespace(callback_query=FakeQuery(user_id, data))
+
+
+async def test_undo_button_restores_mail_and_reports(services):
+    mail = FakeMailService(restored=3, failed=1)
+    services.mail = mail
+    query = FakeQuery(1, "undo:mail:20260918")
+    await ChatHandlers(allowed_user_id=1).on_callback(
+        SimpleNamespace(callback_query=query), context_for(FakeBot(), services)
+    )
+
+    assert [call.strftime("%Y-%m-%d") for call in mail.calls] == ["2026-09-18"]
+    assert query.edited[0].startswith("되돌렸습니다: 메일 3건")
+    assert "1건은 되돌리지 못했습니다" in query.edited[0]
+    assert (await services.conversation.consume_notes())[0].startswith("메일 정리 되돌리기")
+
+
+async def test_undo_without_mail_service_says_nothing_to_undo(services):
+    services.mail = None
+    query = FakeQuery(1, "undo:mail:20260918")
+    await ChatHandlers(allowed_user_id=1).on_callback(
+        SimpleNamespace(callback_query=query), context_for(FakeBot(), services)
+    )
+    assert query.edited == [UNDO_NOTHING]
+
+
+async def test_undo_from_another_user_is_ignored(services):
+    services.mail = FakeMailService()
+    query = FakeQuery(999, "undo:mail:20260918")
+    await ChatHandlers(allowed_user_id=1).on_callback(
+        SimpleNamespace(callback_query=query), context_for(FakeBot(), services)
+    )
+    assert query.edited == [] and services.mail.calls == []

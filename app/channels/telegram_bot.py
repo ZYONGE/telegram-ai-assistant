@@ -15,6 +15,7 @@ from app.channels.telegram import TelegramNotifier
 from app.core.clock import utc_now
 from app.core.interfaces import Button, OutgoingMessage
 from app.llm import TransientLLMError
+from app.mail.service import MailService, parse_undo
 from app.storage.conversation import ConversationStore, PendingAction
 from app.storage.location import LocationStore
 from app.tools.registry import ToolRegistry
@@ -36,6 +37,8 @@ LOCATION_HELP = (
 )
 LOCATION_HIDDEN = "위치 버튼을 치웠습니다. 다시 띄우려면 /location 을 보내 주세요."
 HIDE_WORDS = {"off", "끄기", "숨기기", "치워"}
+UNDO_DONE = "되돌렸습니다: 메일 {restored}건을 받은편지함으로 되돌렸습니다."
+UNDO_NOTHING = "되돌릴 메일이 없습니다."
 
 
 @dataclass(slots=True)
@@ -46,6 +49,8 @@ class ChatServices:
     clock: Callable[[], datetime] = utc_now
     # 사용자가 보낸 위치를 저장한다. 꺼져 있으면 None.
     location: LocationStore | None = None
+    # 메일 정리 되돌리기에 쓴다. Google 연결 전에는 None.
+    mail: MailService | None = None
 
 
 def confirmation_message(action: PendingAction) -> OutgoingMessage:
@@ -60,6 +65,20 @@ def parse_callback(data: str | None) -> tuple[str, str] | None:
     if verb in (CONFIRM, CANCEL) and action_id:
         return verb, action_id
     return None
+
+
+async def handle_undo(services: ChatServices, day_start: datetime) -> str:
+    """저녁 브리핑의 [메일 정리 되돌리기] 처리."""
+    if services.mail is None:
+        return UNDO_NOTHING
+    restored, failed = await services.mail.undo_cleanup(day_start)
+    if not restored and not failed:
+        return UNDO_NOTHING
+    text = UNDO_DONE.format(restored=restored)
+    if failed:
+        text += f" {failed}건은 되돌리지 못했습니다."
+    await services.conversation.add_note(f"메일 정리 되돌리기: {restored}건 복구", services.clock())
+    return text
 
 
 async def handle_confirmation(services: ChatServices, verb: str, action_id: str) -> str | None:
@@ -167,11 +186,18 @@ class ChatHandlers:
         query = update.callback_query
         if query is None or query.from_user.id != self._allowed_user_id:
             return
+        services: ChatServices = context.bot_data[SERVICES_KEY]
+        undo_day = parse_undo(query.data or "")
+        if undo_day is not None:
+            await query.answer()
+            await query.edit_message_text(await handle_undo(services, undo_day))
+            return
+
         parsed = parse_callback(query.data)
         if parsed is None:
             await query.answer()
             return
-        text = await handle_confirmation(context.bot_data[SERVICES_KEY], *parsed)
+        text = await handle_confirmation(services, *parsed)
         if text is None:
             await query.answer(ALREADY_HANDLED)
             return
