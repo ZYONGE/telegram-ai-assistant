@@ -16,7 +16,7 @@ def test_sender_domain_and_keyword_matching():
     assert PAYMENT.evaluate(message(sender="other@example.com", subject="9월 결제 내역")).matched
     assert PROFESSOR.evaluate(message(sender="prof@example.ac.kr")).matched
     # 하위 도메인도 같은 학교로 본다
-    assert PROFESSOR.evaluate(message(sender="office@example.ac.kr")).matched
+    assert PROFESSOR.evaluate(message(sender="office@cs.example.ac.kr")).matched
     assert PROFESSOR.evaluate(message(sender="someone@example.ac.kr.evil.com")).matched is False
     assert AD.evaluate(message(subject="가을 특가 세일")).matched
 

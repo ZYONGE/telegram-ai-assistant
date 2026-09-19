@@ -44,16 +44,16 @@ async def test_empty_rule_list_explains_the_default(setup):
 
 async def test_add_rule_confirms_then_saves(setup):
     tool = setup["tools"]["add_mail_rule"]
-    args = {"name": "교수님 메일", "kind": "professor", "domains": "example.ac.kr, example.ac.kr"}
+    args = {"name": "교수님 메일", "kind": "professor", "domains": "example.ac.kr, cs.example.ac.kr"}
 
     summary = await tool.describe(args)
     assert summary.startswith("메일 규칙 추가 — 교수님 메일 [교수님·학과]")
-    assert "도메인 example.ac.kr, example.ac.kr" in summary
+    assert "도메인 example.ac.kr, cs.example.ac.kr" in summary
     assert await setup["rules"].list_all() == []
 
     result = await tool.run(args)
     saved = await setup["rules"].list_all()
-    assert len(saved) == 1 and saved[0].domains == ("example.ac.kr", "example.ac.kr")
+    assert len(saved) == 1 and saved[0].domains == ("example.ac.kr", "cs.example.ac.kr")
     assert "등록했습니다" in result.content
 
     listed = await setup["tools"]["list_mail_rules"].run({})
