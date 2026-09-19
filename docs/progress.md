@@ -43,8 +43,8 @@
 
 | 연동 | 상태 | 예정 | 준비할 것 |
 |---|---|---|---|
-| Google Calendar | **구현 완료, 연결 대기** | 5단계 | 아래 '5절 Google 연결 방법'대로 클라이언트 파일 저장 + 계정별 로그인 |
-| Gmail | **구현 완료, 연결 대기** | 5단계 | 같은 로그인으로 함께 연결됨. 연결 뒤 대화로 메일 유형 규칙을 등록하면 분류가 시작된다 |
+| Google Calendar | **연결됨** (개인·학교·기타 3개 계정, 2026-09-20) | 5단계 | 없음 |
+| Gmail | **연결됨** (계정 3개, 2026-09-20) | 5단계 | 대화로 메일 유형 규칙을 등록하면 분류가 시작된다 |
 | eClass | 미구현 (eclass-cli 흐름 분석 완료) | 6단계 | `private/.env`에 학교 포털 계정, 학교 포털·eClass 주소(로컬 설정), Playwright 브라우저 설치 |
 | 날씨 (기상청 단기예보) | **연결됨** (키 등록, 실제 호출 확인) | 4단계 | 텔레그램에서 위치를 한 번 보내면 그 위치 기준으로 동작 |
 | 웹 검색 | **연결됨** (Gemini Google 검색 그라운딩) | 4단계 | 없음. 끄려면 `[llm.gemini] web_search = false` |
@@ -58,9 +58,10 @@
 - 개인 폴더 `private/` (git 제외, 개인정보와 비밀값은 전부 여기에만 둔다)
   - `.env`: 봇 토큰, 모델 키 등 비밀값
   - `profile.md`: 이름·호칭·학교·시간표 등 사용자가 직접 작성 (호칭도 여기서 읽는다)
+  - `instructions.md`: 말투·보고 방법·일정·메일 방침 등 사용자가 정한 판단 기준. 적은 내용이 시스템 프롬프트에 들어가고, 빈 항목과 안내 주석은 자동으로 빠진다. 코드가 강제하는 규칙(조용한 시간, 알림 상한, 확인 버튼, 외부 발송 금지)은 이 파일로 바꿀 수 없다
   - `local.toml`: 지역·주소처럼 개인을 알아볼 수 있는 설정값 (없어도 된다)
   - `assistant.db`: 할 일·알림·예약·대화·보관함·마지막 위치, `memory.md`: 비서 기억
-- 빈 양식은 `templates/`에 있다 (`env.example`, `profile.example.md`, `local.example.toml`). 새 컴퓨터에서는 이 세 개를 `private/`로 복사해 채운다.
+- 빈 양식은 `templates/`에 있다 (`env.example`, `profile.example.md`, `instructions.example.md`, `local.example.toml`). 새 컴퓨터에서는 이 세 개를 `private/`로 복사해 채운다.
 - 모델 호출 경로: 현재 **결제 미연결 무료 티어 키**로 운영 중 (`[llm.gemini] billing_enabled = false`, `allow_free_tier = true`). 무료 티어에서는 입력 내용이 Google 제품 개선에 쓰일 수 있다. 결제를 연결하면 두 값을 `true` / `false`로 바꿔 B안으로 돌아간다.
 
 ## 5. 다음 작업

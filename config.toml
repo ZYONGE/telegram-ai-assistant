@@ -82,4 +82,6 @@ max_active_messages = 80
 db_path = "private/assistant.db"
 memory_path = "private/memory.md"
 profile_path = "private/profile.md"
+# 사용자가 직접 쓰는 판단 기준 (말투, 보고 방법, 메일·일정 처리 방침)
+instructions_path = "private/instructions.md"
 system_prompt_path = "prompts/system_prompt.md"

@@ -127,7 +127,12 @@ async def create_runtime(settings: Settings, bot: Bot, llm: LLM | None = None) -
         *(mail_tools(google, mail_rules, mail) if google.ready else not_connected_mail_tools()),
     )
 
-    prompt = PromptBuilder(settings.storage.system_prompt_path, settings.storage.profile_path, memory)
+    prompt = PromptBuilder(
+        settings.storage.system_prompt_path,
+        settings.storage.profile_path,
+        memory,
+        settings.storage.instructions_path,
+    )
     assistant = Assistant(llm.chat, settings.conversation, prompt, conversation, registry, light)
     tasks.set_agent_runner(assistant.run_task)
 

@@ -49,6 +49,8 @@ class StorageSettings:
     memory_path: Path
     profile_path: Path
     system_prompt_path: Path
+    # 사용자가 직접 쓰는 판단 기준 (말투, 보고 방법, 일정·메일 처리 방침)
+    instructions_path: Path = PRIVATE_DIR / "instructions.md"
 
 
 @dataclass(frozen=True, slots=True)
@@ -244,6 +246,7 @@ def load_settings(
                 memory_path=path(storage.get("memory_path", str(PRIVATE_DIR / "memory.md"))),
                 profile_path=path(storage.get("profile_path", str(PRIVATE_DIR / "profile.md"))),
                 system_prompt_path=path(storage.get("system_prompt_path", "prompts/system_prompt.md")),
+                instructions_path=path(storage.get("instructions_path", str(PRIVATE_DIR / "instructions.md"))),
             ),
             llm=LLMSettings(
                 provider=provider,

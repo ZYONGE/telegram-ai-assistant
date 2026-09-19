@@ -126,10 +126,74 @@ def test_load_identity_without_profile(tmp_path):
     assert load_identity(tmp_path / "없음.md").honorific == "사용자님"
 
 
+async def test_instructions_file_is_included(tmp_path, memory):
+    template = tmp_path / "system.md"
+    template.write_text("지시:\n{instructions}\n프로필:\n{profile}", encoding="utf-8")
+    profile = tmp_path / "profile.md"
+    profile.write_text("- 이름: 홍길동\n", encoding="utf-8")
+    instructions = tmp_path / "instructions.md"
+    instructions.write_text("## 말투\n- 기본: 짧게\n", encoding="utf-8")
+
+    prompt = await PromptBuilder(template, profile, memory, instructions).build("")
+    assert "- 기본: 짧게" in prompt and "- 이름: 홍길동" in prompt
+
+
+async def test_missing_or_empty_instructions_say_so(tmp_path, memory):
+    template = tmp_path / "system.md"
+    template.write_text("{instructions}", encoding="utf-8")
+    profile = tmp_path / "profile.md"
+    profile.write_text("- 이름: 홍길동\n", encoding="utf-8")
+
+    assert await PromptBuilder(template, profile, memory).build("") == "(아직 작성되지 않음)"
+
+    blank = tmp_path / "instructions.md"
+    blank.write_text("# 지시\n\n## 1. 말투\n- 기본 말투:\n\n## 2. 보고\n- 방식:\n", encoding="utf-8")
+    assert await PromptBuilder(template, profile, memory, blank).build("") == "(아직 작성되지 않음)"
+
+
+def test_empty_sections_and_tables_are_dropped():
+    text = """# 지시
+
+## 1. 말투
+- 기본: 짧게
+- 이모지:
+
+## 2. 보고
+- 방식:
+
+## 3. 메일
+
+### 규칙
+| 이름 | 유형 |
+|---|---|
+| 결제 | payment |
+
+## 4. 비어 있는 표
+| 머리글 | 없음 |
+|---|---|
+"""
+    cleaned = clean_profile(text)
+    assert "## 1. 말투" in cleaned and "- 기본: 짧게" in cleaned
+    assert "## 2. 보고" not in cleaned
+    # 하위 절에 내용이 있으면 상위 제목은 남는다
+    assert "## 3. 메일" in cleaned and "### 규칙" in cleaned and "| 결제 | payment |" in cleaned
+    assert "## 4. 비어 있는 표" not in cleaned and "머리글" not in cleaned
+
+
+def test_project_instructions_template_stays_empty_until_filled():
+    from pathlib import Path
+
+    form = (Path(__file__).parents[2] / "templates" / "instructions.example.md").read_text(encoding="utf-8")
+    # 빈 양식은 프롬프트에 아무것도 넣지 않는다
+    assert clean_profile(form) == ""
+    for heading in ("말투", "보고 방법", "일정 관리", "메일 정리 규칙", "답장 초안", "주간 계획"):
+        assert heading in form
+
+
 def test_project_system_prompt_has_all_placeholders():
     from pathlib import Path
 
     text = (Path(__file__).parents[2] / "prompts" / "system_prompt.md").read_text(encoding="utf-8")
-    for placeholder in ("{honorific}", "{profile}", "{memory}", "{summary}"):
+    for placeholder in ("{honorific}", "{instructions}", "{profile}", "{memory}", "{summary}"):
         assert placeholder in text
     assert "{current_datetime}" not in text
