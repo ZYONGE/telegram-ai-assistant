@@ -266,7 +266,8 @@ def three_accounts(tmp_path):
 
 def accounts_with(settings, handler):
     http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    return GoogleAccounts(settings, http), http
+    # 토큰 만료 판단을 고정 시계로 한다
+    return GoogleAccounts(settings, http, clock=lambda: kst(9, 18, 12)), http
 
 
 def test_connected_accounts_and_lookup(three_accounts):

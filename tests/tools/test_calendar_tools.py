@@ -58,7 +58,8 @@ def build(tmp_path, api: FakeCalendarApi, connected=("개인", "학교")):
         settings_accounts.append(GoogleAccountSettings(label, token_file, default=(label == "개인")))
     settings = GoogleSettings(client_file=client_file, accounts=tuple(settings_accounts))
     http = httpx.AsyncClient(transport=httpx.MockTransport(api))
-    accounts = GoogleAccounts(settings, http)
+    # 토큰 만료 판단도 고정 시계로 한다 (실제 날짜가 지나도 테스트가 흔들리지 않게)
+    accounts = GoogleAccounts(settings, http, clock=lambda: NOW)
     return {tool.spec.name: tool for tool in calendar_tools(accounts, lambda: NOW)}, http
 
 

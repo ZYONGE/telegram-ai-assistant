@@ -29,7 +29,8 @@
     - 의존성을 추가할 때는 간접 의존성까지 라이선스를 확인한다. GPL·AGPL 의존성은 쓰지 않는다.
     - LGPL(`python-telegram-bot`)·MPL(`certifi`) 패키지는 수정 없이 라이브러리로만 사용한다. 소스를 저장소에 복사하거나 수정본을 만들지 않는다.
 11. **모든 기능은 하나의 비서로 묶인다.** 레퍼런스를 참고해 기능을 구현하되, 기능별로 따로 노는 모듈을 만들지 않고 4-1절의 공통 접점으로만 연결한다.
-12. **저장소는 공개다. 개인정보와 비밀값을 저장소에 넣지 않는다.** 개인을 알아볼 수 있는 값(이름·호칭·학교·연락처·지역·계정·키)은 git에서 제외된 `private/` 폴더 **한 곳**에만 둔다 (`private/.env`=비밀값, `private/profile.md`=신상·학사 정보, `private/local.toml`=개인 설정 덮어쓰기, `private/`의 DB·기억 파일). 새로 생기는 개인 파일도 반드시 이 폴더 안에 만든다. 빈 양식은 `templates/`에 둔다. 코드·프롬프트·문서·테스트에는 "사용자", `{honorific}` 같은 자리표시나 예시 값만 쓴다. 커밋 전에 개인정보·키가 섞이지 않았는지 확인한다.
+12. **저장소는 공개다. 개인정보와 비밀값을 저장소에 넣지 않는다.** 개인을 알아볼 수 있는 값(이름·호칭·학교·연락처·지역·계정·키)은 git에서 제외된 `private/` 폴더 **한 곳**에만 둔다 (`private/.env`=비밀값, `private/profile.md`=신상·학사 정보, `private/local.toml`=개인 설정 덮어쓰기, `private/`의 DB·기억 파일). 새로 생기는 개인 파일도 반드시 이 폴더 안에 만든다. 빈 양식은 `templates/`에 둔다. 코드·프롬프트·문서·테스트에는 "사용자", `{honorific}` 같은 자리표시나 예시 값만 쓴다.
+    커밋 전 검사는 `.githooks/pre-commit`이 자동으로 한다 (`scripts/check_private.py`). `private/`의 실제 값이나 키 모양 문자열이 스테이징되면 커밋이 멈춘다. 설치는 `git config core.hooksPath .githooks` 한 번.
 
 ## 3. 기술 스택과 공통 규칙
 
@@ -233,4 +234,4 @@ assistant/
 - 상세 진행 기록, 외부 연동 현황, 다음 작업, 개발 환경 메모는 `docs/progress.md`에 둔다. 단계를 마칠 때마다 두 곳을 함께 갱신한다.
 - 실행: `py -3.14 -m uv run python -m app.main` (Ctrl+C로 종료)
 - Google 계정 연결: `py -3.14 -m uv run python -m app.google.login <계정 이름>` (이름 없이 실행하면 연결 상태만 보여 준다)
-- 처음 받은 컴퓨터에서는 `templates/`의 양식을 `private/`로 복사해 채운다 (`env.example` → `private/.env`, `profile.example.md` → `private/profile.md`).
+- 새 컴퓨터에서 받으면 `git config core.hooksPath .githooks`로 커밋 검사 훅을 켜고, `templates/`의 양식을 `private/`로 복사해 채운다 (`env.example` → `private/.env`, `profile.example.md` → `private/profile.md`).

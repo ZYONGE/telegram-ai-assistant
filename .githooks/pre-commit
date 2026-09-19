@@ -1,0 +1,10 @@
+#!/bin/sh
+# 커밋 전 개인정보 검사 (CLAUDE.md 절대 규칙 12)
+# 설치: git config core.hooksPath .githooks
+for runner in "py -3.14" "py -3" "python3" "python"; do
+    if $runner -c "import sys" >/dev/null 2>&1; then
+        exec $runner scripts/check_private.py
+    fi
+done
+echo "개인정보 검사기를 실행할 파이썬을 찾지 못했습니다. 검사를 건너뛰지 말고 환경을 확인하세요." >&2
+exit 1
