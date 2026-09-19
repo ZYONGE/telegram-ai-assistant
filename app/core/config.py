@@ -92,6 +92,30 @@ class GoogleSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class EclassSettings:
+    """학교 eClass 수집 설정.
+
+    주소는 학교를 특정하므로 private/local.toml에, 계정은 private/.env에 둔다.
+    비밀번호는 수집기 안에서만 쓰고 모델 프롬프트·도구 결과·로그에 넣지 않는다 (절대 규칙 7).
+    """
+
+    portal_url: str = ""
+    eclass_url: str = ""
+    username: str = ""
+    password: str = ""
+    # 수집 간격(분). 0이면 수집하지 않는다.
+    poll_minutes: int = 90
+    # 이 시간 넘게 수집이 성공하지 못하면 알린다
+    stale_hours: int = 12
+    # 로그인 세션 저장 위치 (재로그인 횟수를 줄인다)
+    session_file: Path = PRIVATE_DIR / "browser" / "eclass_session.json"
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.portal_url and self.username and self.password and self.poll_minutes > 0)
+
+
+@dataclass(frozen=True, slots=True)
 class MailSettings:
     """메일 수집 주기와 보호 도메인. 학교 도메인처럼 개인을 알아볼 수 있는 값은 private/local.toml에 둔다."""
 
@@ -147,6 +171,7 @@ class Settings:
     storage: StorageSettings
     llm: LLMSettings = field(default_factory=LLMSettings)
     google: GoogleSettings = GoogleSettings()
+    eclass: EclassSettings = EclassSettings()
     mail: MailSettings = MailSettings()
     weather: WeatherSettings = WeatherSettings()
     conversation: ConversationSettings = ConversationSettings()
@@ -224,6 +249,7 @@ def load_settings(
         storage = data["storage"]
         llm = data.get("llm", {})
         google = data.get("google", {})
+        eclass = data.get("eclass", {})
         mail = data.get("mail", {})
         weather = data.get("weather", {})
         conversation = data.get("conversation", {})
@@ -255,6 +281,16 @@ def load_settings(
                 options=dict(llm.get(provider, {})),
             ),
             google=_google(google, path),
+            eclass=EclassSettings(
+                portal_url=str(eclass.get("portal_url", "")),
+                eclass_url=str(eclass.get("eclass_url", "")),
+                # 계정은 설정 파일이 아니라 환경변수에서만 읽는다
+                username=str(env.get("ECLASS_ID", "")),
+                password=str(env.get("ECLASS_PASSWORD", "")),
+                poll_minutes=int(eclass.get("poll_minutes", 90)),
+                stale_hours=int(eclass.get("stale_hours", 12)),
+                session_file=path(eclass.get("session_file", str(PRIVATE_DIR / "browser" / "eclass_session.json"))),
+            ),
             mail=MailSettings(
                 poll_minutes=int(mail.get("poll_minutes", 10)),
                 protected_domains=tuple(str(item).lower() for item in mail.get("protected_domains", ())),

@@ -45,6 +45,14 @@ label = "학교"
 [[google.accounts]]
 label = "기타"
 
+# eClass 수집. 학교 주소는 학교를 특정하므로 private/local.toml에, 계정은 private/.env에 둔다
+# (ECLASS_ID, ECLASS_PASSWORD). 주소나 계정이 없으면 이 기능만 꺼진다.
+[eclass]
+# 수집 간격(분). 0이면 수집하지 않는다.
+poll_minutes = 90
+# 이 시간 넘게 수집이 성공하지 못하면 알린다
+stale_hours = 12
+
 # 메일 (Gmail). 유형 규칙은 대화로 등록하고 DB에 저장된다.
 # 학교 도메인처럼 개인을 알아볼 수 있는 보호 도메인은 private/local.toml의 [mail] protected_domains에 둔다.
 [mail]

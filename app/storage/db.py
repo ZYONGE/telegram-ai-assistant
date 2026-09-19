@@ -187,6 +187,29 @@ MIGRATIONS: list[str] = [
         UNIQUE (account, thread_id)
     );
     """,
+    """
+    -- eClass에서 본 글과 과제. 마감 변경을 알아채려고 이전 마감 값을 남긴다.
+    CREATE TABLE eclass_items (
+        item_id        TEXT PRIMARY KEY,
+        kind           TEXT NOT NULL,
+        course         TEXT NOT NULL DEFAULT '',
+        title          TEXT NOT NULL,
+        due_at         TEXT,
+        url            TEXT NOT NULL DEFAULT '',
+        first_seen_at  TEXT NOT NULL,
+        updated_at     TEXT NOT NULL
+    );
+    CREATE INDEX idx_eclass_due ON eclass_items (due_at);
+
+    -- 수집 성공·실패 이력 (한 줄). 로그인 연속 실패를 세어 자동화를 멈추는 근거가 된다.
+    CREATE TABLE eclass_state (
+        id           INTEGER PRIMARY KEY CHECK (id = 1),
+        last_ok_at   TEXT,
+        fail_count   INTEGER NOT NULL DEFAULT 0,
+        last_reason  TEXT NOT NULL DEFAULT '',
+        failed_at    TEXT
+    );
+    """,
 ]
 
 

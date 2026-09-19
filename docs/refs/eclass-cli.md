@@ -83,6 +83,20 @@ eclass-cli는 headless 브라우저로 로그인한 뒤, 같은 브라우저 세
 | 실패하면 예외를 그대로 던짐 | `Event(kind="collector_failed")`로 보고. 실패를 로그인 실패 / 추가 인증·CAPTCHA / 구조 변경 / 네트워크로 구분 | 3절 공통 규칙, 6절 eClass 규칙 |
 | 여러 대학 분기, 서비스마다 기본 URL 하드코딩 | 사용하는 학교 하나만 지원하고, 학교 주소는 공개 저장소 밖의 로컬 설정에 둠 | 범위 축소, 중복 제거 |
 
+## 6단계에서 실제 사이트로 확인한 것 (2026-09-20)
+
+학교 eClass는 eclass-cli가 본 것과 같은 LMS(`/ilos/...`, `.acl`)지만 **포털 SSO를 거치지 않는 직접 로그인**이었다.
+
+| 용도 | 경로 | 확인 내용 |
+|---|---|---|
+| 로그인 화면 | `/ilos/main/member/login_form.acl` | 폼 `myform` → `POST /ilos/lo/login.acl`, 입력 `#usr_id`, `#usr_pwd`, 히든 `returnURL`·`challenge`·`response` |
+| 로그인 성공 판정 | `/ilos/main/main_form.acl` 도달 | |
+| 추가 인증 | 같은 로그인 화면의 `capform`(히든 `reCaptcha`) | 평소에는 reCAPTCHA 스크립트가 없고, 걸리면 나타난다 → 감지하면 중단 |
+| 수강 과목 | `/ilos/mp/course_register_list_form.acl` | eclass-cli와 동일 |
+| 할 일 목록 | `POST /ilos/mp/todo_list.acl` | eclass-cli와 동일 |
+| 전체 공지 | `/ilos/community/notice_list_form.acl` | 로그인 없이도 열린다 |
+| 학사일정 | `/ilos/st/schedule/academic_calendar_list_form.acl` | |
+
 ## eclass-cli에 없어서 6단계에서 직접 조사할 것
 
 - 과목별 공지, 알림함, 전체 공지, 학사일정 페이지의 경로와 구조

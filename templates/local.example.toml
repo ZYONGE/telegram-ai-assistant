@@ -20,3 +20,8 @@
 # 휴지통 이동에서 제외할 도메인 (학교, 지원 기업 등). 등록한 교수님·지원기업 규칙은 자동으로 보호된다.
 # [mail]
 # protected_domains = ["example.ac.kr"]
+
+# 학교 포털·eClass 주소 (학교를 특정하므로 공개 저장소에 두지 않는다)
+# [eclass]
+# portal_url = "https://portal.example.ac.kr"
+# eclass_url = "https://eclass.example.ac.kr"
