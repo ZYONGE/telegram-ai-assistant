@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>텔레그램 개인 AI 비서</title>
+<style>
+  :root { color-scheme: light dark; --fg: #1b1b1f; --muted: #5a5a66; --bg: #ffffff; --line: #e3e3e8; --accent: #2b6cb0; }
+  @media (prefers-color-scheme: dark) {
+    :root { --fg: #e8e8ec; --muted: #a6a6b2; --bg: #17171b; --line: #2e2e36; --accent: #7fb3e8; }
+  }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font-family: system-ui, -apple-system, "Segoe UI", "Malgun Gothic", sans-serif; line-height: 1.7; }
+  main { max-width: 720px; margin: 0 auto; padding: 48px 16px 64px; }
+  h1 { font-size: 1.6rem; margin-bottom: 8px; }
+  h2 { font-size: 1.1rem; margin-top: 32px; border-top: 1px solid var(--line); padding-top: 24px; }
+  p.lead { color: var(--muted); margin-top: 0; }
+  ul { padding-left: 20px; }
+  li { margin: 6px 0; }
+  a { color: var(--accent); }
+  footer { margin-top: 40px; border-top: 1px solid var(--line); padding-top: 16px; color: var(--muted); font-size: 0.9rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>텔레그램 개인 AI 비서</h1>
+  <p class="lead">사용자 한 명이 자신의 일정·할 일·메일을 관리하려고 직접 만들어 직접 실행하는 개인용 프로그램입니다.</p>
+
+  <h2>무엇을 하나요</h2>
+  <ul>
+    <li>텔레그램으로 대화하며 할 일, 리마인더, 예약 작업, 기억을 관리합니다.</li>
+    <li>아침·저녁 브리핑과 일요일 주간 계획을 보냅니다.</li>
+    <li>날씨와 옷차림을 알려 주고, 웹 검색 결과를 요약합니다.</li>
+    <li>링크와 메모를 보관함에 저장하고 말로 찾아 줍니다.</li>
+    <li>Google 캘린더 일정을 조회·등록하고, Gmail 새 메일을 사용자가 등록한 규칙대로 정리합니다.</li>
+  </ul>
+
+  <h2>어디서 도나요</h2>
+  <p>
+    서버 없이 사용자 본인의 컴퓨터에서 실행됩니다. 수집한 내용은 그 컴퓨터 안의 파일과 데이터베이스에만 저장되며,
+    운영자가 접근할 수 있는 공용 서버는 없습니다.
+  </p>
+
+  <h2>하지 않는 것</h2>
+  <ul>
+    <li>메일을 보내지 않습니다. 답장은 임시보관함에 초안으로만 저장합니다.</li>
+    <li>메일을 영구 삭제하지 않습니다. 규칙에 따른 휴지통 이동만 하고, 되돌릴 수 있습니다.</li>
+    <li>결제·송금·계정 설정 변경을 하지 않습니다.</li>
+  </ul>
+
+  <h2>소스 코드</h2>
+  <p>
+    MIT 라이선스로 공개되어 있습니다.
+    <a href="https://github.com/ZYONGE/telegram-ai-assistant">github.com/ZYONGE/telegram-ai-assistant</a>
+  </p>
+
+  <footer>
+    <a href="./privacy.html">개인정보처리방침</a>
+  </footer>
+</main>
+</body>
+</html>
