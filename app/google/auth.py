@@ -33,7 +33,9 @@ DEFAULT_SCOPES = (CALENDAR_SCOPE, GMAIL_SCOPE)
 
 # 만료 직전에 미리 갱신한다
 REFRESH_MARGIN = timedelta(minutes=2)
-LOGIN_TIMEOUT = 300
+# 브라우저에서 계정을 고르고 허용할 때까지 기다리는 시간. 짧으면 루프백 서버가 먼저 닫혀
+# 브라우저에 ERR_CONNECTION_REFUSED가 뜬다.
+LOGIN_TIMEOUT = 600
 
 LOGIN_NEEDED = (
     "Google 계정 연결이 아직 안 되어 있습니다. private/google_client.json을 두고 "
