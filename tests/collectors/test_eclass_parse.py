@@ -6,7 +6,7 @@ from app.collectors.eclass.parse import (
     parse_notices,
     parse_todo_list,
 )
-from app.collectors.eclass.session import Failure, classify_login, logged_out
+from app.collectors.eclass.session import Failure, classify_login, logged_in, logged_out
 from tests.conftest import kst
 
 TODO_HTML = """
@@ -118,13 +118,21 @@ def test_notices_are_read_with_article_ids():
 # --- 로그인 결과 판정 ---
 
 
+MAIN_URL = "https://eclass.example.ac.kr/ilos/main/main_form.acl"
+LOGIN_URL = "https://eclass.example.ac.kr/ilos/main/member/login_form.acl"
+LOGGED_IN_HTML = '<a href="/ilos/lo/logout.acl">로그아웃</a>'
+LOGIN_FORM_HTML = '<input id="usr_id"><input id="usr_pwd">'
+
+
 @pytest.mark.parametrize(
     ("url", "html", "expected"),
     [
-        ("https://eclass.example.ac.kr/ilos/main/main_form.acl", "<html>환영합니다</html>", None),
-        ("https://eclass.example.ac.kr/ilos/main/member/login_form.acl", "<html>아이디</html>", Failure.LOGIN),
-        ("https://eclass.example.ac.kr/ilos/main/main_form.acl", "<div class='g-recaptcha'>", Failure.CAPTCHA),
-        ("https://eclass.example.ac.kr/ilos/main/member/login_form.acl", "자동입력 방지", Failure.CAPTCHA),
+        # 로그인에 실패해도 메인 주소로 보내 주므로, 주소만으로는 판단하지 않는다
+        (MAIN_URL, LOGGED_IN_HTML, None),
+        (MAIN_URL, LOGIN_FORM_HTML, Failure.LOGIN),
+        (LOGIN_URL, LOGIN_FORM_HTML, Failure.LOGIN),
+        (MAIN_URL, "<div class='g-recaptcha'>", Failure.CAPTCHA),
+        (LOGIN_URL, "자동입력 방지", Failure.CAPTCHA),
         ("https://eclass.example.ac.kr/ilos/etc/unknown.acl", "<html>?</html>", Failure.LAYOUT),
     ],
 )
@@ -132,7 +140,12 @@ def test_login_result_is_classified(url, html, expected):
     assert classify_login(url, html) is expected
 
 
-def test_logged_out_is_detected_from_url_or_form():
-    assert logged_out("https://eclass.example.ac.kr/ilos/main/member/login_form.acl", "") is True
-    assert logged_out("https://eclass.example.ac.kr/ilos/main/main_form.acl", '<input id="usr_id">') is True
-    assert logged_out("https://eclass.example.ac.kr/ilos/main/main_form.acl", "<html>수업</html>") is False
+def test_logged_in_needs_a_real_marker():
+    assert logged_in(LOGGED_IN_HTML) is True
+    # 스크립트·CSS 이름에 logout이 들어간 것만으로는 로그인으로 보지 않는다
+    assert logged_in('<div class="header_logout"></div><script src="session_check.js"></script>') is False
+
+
+def test_logged_out_is_detected_without_the_marker():
+    assert logged_out(LOGIN_URL, LOGIN_FORM_HTML) is True
+    assert logged_out(MAIN_URL, LOGGED_IN_HTML) is False

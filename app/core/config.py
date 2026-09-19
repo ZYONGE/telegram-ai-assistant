@@ -99,8 +99,9 @@ class EclassSettings:
     비밀번호는 수집기 안에서만 쓰고 모델 프롬프트·도구 결과·로그에 넣지 않는다 (절대 규칙 7).
     """
 
-    portal_url: str = ""
+    # eClass 주소만 있으면 된다. 포털 SSO를 거치는 학교라면 portal_url도 채운다.
     eclass_url: str = ""
+    portal_url: str = ""
     username: str = ""
     password: str = ""
     # 수집 간격(분). 0이면 수집하지 않는다.
@@ -112,7 +113,7 @@ class EclassSettings:
 
     @property
     def enabled(self) -> bool:
-        return bool(self.portal_url and self.username and self.password and self.poll_minutes > 0)
+        return bool(self.eclass_url and self.username and self.password and self.poll_minutes > 0)
 
 
 @dataclass(frozen=True, slots=True)

@@ -18,18 +18,35 @@ from app.core.config import EclassSettings
 logger = logging.getLogger(__name__)
 
 LOGIN_PATH = "/ilos/main/member/login_form.acl"
-LOGIN_ACTION = "/ilos/lo/login.acl"
 MAIN_PATH = "/ilos/main/main_form.acl"
-TODO_PATH = "/ilos/mp/todo_list.acl"
-COURSE_LIST_PATH = "/ilos/mp/course_register_list_form.acl"
+# 할 일 목록은 메인 화면이 AJAX로 부르는 주소다 (2026-09-20 실제 확인)
+TODO_PATH = "/ilos/mp/todo_list_form.acl"
+COURSE_LIST_PATH = "/ilos/st/main/course_ing_list_form.acl"
 NOTICE_PATH = "/ilos/community/notice_list_form.acl"
 ACADEMIC_CALENDAR_PATH = "/ilos/st/schedule/academic_calendar_list_form.acl"
 
 ID_FIELD = "#usr_id"
 PASSWORD_FIELD = "#usr_pwd"
+# 로그인 버튼은 <div onclick="loginForm();">이라 Enter(폼 제출)로는 로그인되지 않는다
+LOGIN_BUTTON = '[onclick*="loginForm"]'
+# 로그인한 화면에만 나오는 표시. 주소만으로는 로그인 여부를 알 수 없다.
+LOGGED_IN_MARKS = ("logout.acl", "로그아웃")
 # 추가 인증이 걸린 신호 (로그인 화면에 reCAPTCHA가 나타난다)
 CAPTCHA_MARKS = ("recaptcha", "그림문자", "자동입력 방지", "captcha")
 PAGE_TIMEOUT_MS = 20_000
+
+# 화면 안에서 보내는 AJAX 요청 (세션과 헤더를 그대로 쓴다)
+_AJAX_POST = """async ({url, body}) => {
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+            'X-Requested-With': 'XMLHttpRequest',
+        },
+        body,
+    });
+    return await response.text();
+}"""
 
 
 class Failure(StrEnum):
@@ -55,21 +72,26 @@ MESSAGES = {
 }
 
 
+def logged_in(html: str) -> bool:
+    """로그인된 화면인지. 실패해도 메인 주소로 보내 주는 경우가 있어 화면 표시로 판단한다."""
+    return any(mark in html for mark in LOGGED_IN_MARKS)
+
+
 def classify_login(url: str, html: str) -> Failure | None:
     """로그인 후 도착한 화면으로 성패를 가린다. 성공이면 None."""
     lowered = html.lower()
     if any(mark in lowered for mark in CAPTCHA_MARKS):
         return Failure.CAPTCHA
-    if MAIN_PATH in url:
+    if logged_in(html):
         return None
-    if LOGIN_PATH in url or "login" in url.lower():
+    if LOGIN_PATH in url or ID_FIELD.strip("#") in html:
         return Failure.LOGIN
     return Failure.LAYOUT
 
 
 def logged_out(url: str, html: str) -> bool:
-    """세션이 끊겨 로그인 화면으로 돌아왔는지."""
-    return LOGIN_PATH in url or ID_FIELD.strip("#") in html
+    """세션이 끊겼는지. 로그인 표시가 없으면 끊긴 것으로 본다."""
+    return not logged_in(html)
 
 
 @dataclass(slots=True)
@@ -130,7 +152,7 @@ class EclassSession:
             await self._page.fill(ID_FIELD, self.settings.username)
             # 비밀번호는 여기서만 쓰인다
             await self._page.fill(PASSWORD_FIELD, self.settings.password)
-            await self._page.press(PASSWORD_FIELD, "Enter")
+            await self._page.click(LOGIN_BUTTON)
             await self._page.wait_for_load_state("networkidle")
         except Exception as exc:
             raise EclassError(Failure.LAYOUT, MESSAGES[Failure.LAYOUT]) from _hide(exc)
@@ -154,14 +176,13 @@ class EclassSession:
             raise EclassError(Failure.NETWORK, MESSAGES[Failure.NETWORK]) from _hide(exc)
 
     async def post(self, path: str, data: dict[str, str]) -> str:
-        """할 일 목록처럼 POST로 받아야 하는 화면. 응답 본문을 그대로 돌려준다."""
+        """할 일 목록처럼 AJAX로 받아야 하는 화면.
+
+        브라우저 밖에서 부르면 세션이 끊긴 것으로 취급되므로, 열려 있는 화면 안에서 같은 방식으로 요청한다.
+        """
+        body = "&".join(f"{key}={value}" for key, value in data.items())
         try:
-            response = await self._context.request.post(self.url_for(path), form=data)
-            if not response.ok:
-                raise EclassError(Failure.NETWORK, f"{MESSAGES[Failure.NETWORK]} (HTTP {response.status})")
-            return await response.text()
-        except EclassError:
-            raise
+            return await self._page.evaluate(_AJAX_POST, {"url": self.url_for(path), "body": body})
         except Exception as exc:
             raise EclassError(Failure.NETWORK, MESSAGES[Failure.NETWORK]) from _hide(exc)
 

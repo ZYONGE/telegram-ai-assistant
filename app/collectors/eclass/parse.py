@@ -106,6 +106,8 @@ def parse_todo_list(html: str) -> ParseResult:
     rows: list[TodoRow] = []
     skipped = 0
     for block in soup.select(".todo_wrap"):
+        if "no_data" in (block.get("class") or []):
+            continue  # "할 일이 없습니다" 자리 표시
         title = _text(block.select_one(".todo_title"))
         onclick = " ".join(
             str(node.get("onclick", "")) for node in [block, *block.find_all(attrs={"onclick": True})]
@@ -133,6 +135,34 @@ def parse_todo_list(html: str) -> ParseResult:
             )
         )
     return ParseResult(rows, skipped)
+
+
+def parse_course_select(html: str) -> ParseResult:
+    """할 일 화면의 과목 선택 상자에서 수강 과목을 읽는다.
+
+    option 값은 "KJKEY||L", 글자는 "[YYYY년 N학기] 과목명" 꼴이다.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    rows: list[CourseRow] = []
+    skipped = 0
+    for option in soup.select("#todo_select option"):
+        value = (option.get("value") or "").strip()
+        if not value:
+            continue  # "전체 과목 보기"
+        label = _text(option)
+        name = label.split("]", 1)[1].strip() if "]" in label else label
+        if not name or len(name) < 2:
+            skipped += 1
+            continue
+        rows.append(CourseRow(kjkey=value.split("||")[0], name=name, time=_term(label)))
+    return ParseResult(rows, skipped)
+
+
+def _term(label: str) -> str:
+    """'[YYYY년 N학기] 과목명' → 'YYYY년 N학기'"""
+    if label.startswith("[") and "]" in label:
+        return " ".join(label[1 : label.index("]")].split())
+    return ""
 
 
 def parse_courses(html: str) -> ParseResult:

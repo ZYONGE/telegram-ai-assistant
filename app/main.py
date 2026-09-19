@@ -6,6 +6,7 @@
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from datetime import datetime
 
 import httpx
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -20,11 +21,12 @@ from app.agent.loop import Assistant
 from app.agent.memory import MarkdownMemoryStore
 from app.agent.prompt import PromptBuilder, load_identity
 from app.channels.telegram import TelegramNotifier
+from app.collectors.eclass.collector import EclassCollector
 from app.collectors.mail import MailCollector
 from app.collectors.weather import KmaWeather
 from app.channels.telegram_bot import SERVICES_KEY, ChatHandlers, ChatServices
-from app.core.clock import KST, utc_now
-from app.core.config import ConfigError, Settings, load_settings
+from app.core.clock import KST, to_kst, utc_now
+from app.core.config import ConfigError, NotificationSettings, Settings, load_settings
 from app.core.interfaces import BriefingKind
 from app.google.accounts import GoogleAccounts
 from app.mail.service import MailService
@@ -44,6 +46,7 @@ from app.scheduler.ingest import Ingestor
 from app.scheduler.tasks import TaskService
 from app.storage.archive import ArchiveRepository
 from app.storage.conversation import ConversationStore, PendingActionStore
+from app.storage.eclass import EclassHealthStore, EclassRepository
 from app.storage.location import LocationStore
 from app.storage.mail import MailCleanupLog, MailRuleRepository, MailStateStore, WaitingReplyStore
 from app.storage.db import Database
@@ -149,6 +152,7 @@ async def create_runtime(settings: Settings, bot: Bot, llm: LLM | None = None) -
         light,
         honorific,
     )
+    eclass_collector = EclassCollector(settings.eclass, EclassRepository(db), EclassHealthStore(db))
     mail_collector = MailCollector(
         google,
         mail_rules,
@@ -159,7 +163,7 @@ async def create_runtime(settings: Settings, bot: Bot, llm: LLM | None = None) -
     )
     ingestor = Ingestor(todos, dispatcher)
     _add_system_jobs(scheduler, settings, dispatcher, assistant, briefing)
-    _add_collector_jobs(scheduler, settings, ingestor, mail_collector, google)
+    _add_collector_jobs(scheduler, settings, ingestor, mail_collector, google, eclass_collector)
     restored = await tasks.start()
     scheduler.start()
     logger.info("예약 작업 %d건 복원, 스케줄러 시작", restored)
@@ -212,6 +216,7 @@ def _add_collector_jobs(
     ingestor: Ingestor,
     mail_collector: MailCollector,
     google: GoogleAccounts,
+    eclass_collector: EclassCollector | None = None,
 ) -> None:
     """수집기 주기 작업. 조용한 시간에는 돌리지 않는다 (알림도 어차피 보류된다)."""
     minutes = settings.mail.poll_minutes
@@ -234,6 +239,35 @@ def _add_collector_jobs(
         max_instances=1,
     )
     logger.info("메일 수집: %d분마다 (%02d시~%02d시)", minutes, start.hour, end.hour)
+
+    if eclass_collector is None or not settings.eclass.enabled:
+        logger.info("eClass 수집을 켜지 않았습니다 (주소와 계정이 필요합니다)")
+        return
+
+    async def collect_eclass() -> None:
+        now = utc_now()
+        if not within_active_hours(now, settings.notification):
+            return  # 조용한 시간에는 돌리지 않는다
+        try:
+            await ingestor.run_collector(eclass_collector, now)
+        except Exception:
+            logger.exception("eClass 수집 실패")
+
+    scheduler.add_job(
+        collect_eclass,
+        IntervalTrigger(minutes=settings.eclass.poll_minutes),
+        id="collector:eclass",
+        coalesce=True,
+        max_instances=1,
+    )
+    logger.info("eClass 수집: %d분마다 (%02d시~%02d시)", settings.eclass.poll_minutes, start.hour, end.hour)
+
+
+def within_active_hours(now: datetime, notification: NotificationSettings) -> bool:
+    """조용한 시간(기본 23:00~06:30) 밖이면 True."""
+    local = to_kst(now).time()
+    start, end = notification.quiet_end, notification.quiet_start
+    return start <= local < end if start <= end else not (end <= local < start)
 
 
 def build_application(settings: Settings) -> Application:
