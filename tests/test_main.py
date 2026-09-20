@@ -9,7 +9,9 @@ from app.core.config import (
     BriefingSettings,
     ConfigError,
     ConversationSettings,
+    EclassSettings,
     LLMSettings,
+    MailSettings,
     NotificationSettings,
     Settings,
     StorageSettings,
@@ -66,6 +68,60 @@ async def test_system_jobs_include_the_weekly_plan(scheduler):
     weekly = str(jobs["system:briefing:weekly"].trigger)
     assert "day_of_week='sun'" in weekly and "hour='21'" in weekly
     assert "hour='7'" in str(jobs["system:briefing:morning"].trigger)
+
+
+# --- 수집기 등록: 메일과 eClass는 서로 독립이어야 한다 (docs/tasks.md T-02) ---
+
+ECLASS_ON = EclassSettings(
+    eclass_url="https://eclass.example.ac.kr/", username="학번", password="비밀", poll_minutes=90
+)
+ECLASS_OFF = EclassSettings()
+
+
+def collector_settings(mail_minutes: int, eclass: EclassSettings) -> SimpleNamespace:
+    return SimpleNamespace(
+        mail=MailSettings(poll_minutes=mail_minutes),
+        eclass=eclass,
+        notification=NotificationSettings(),
+    )
+
+
+def collector_jobs(scheduler, *, mail_minutes: int, google_ready: bool, eclass: EclassSettings) -> set[str]:
+    app_main._add_collector_jobs(
+        scheduler,
+        collector_settings(mail_minutes, eclass),
+        ingestor=None,
+        mail_collector=None,
+        google=SimpleNamespace(ready=google_ready),
+        eclass_collector=object() if eclass.enabled else None,
+    )
+    return {job.id for job in scheduler.get_jobs()}
+
+
+async def test_both_collectors_are_registered(scheduler):
+    jobs = collector_jobs(scheduler, mail_minutes=10, google_ready=True, eclass=ECLASS_ON)
+    assert jobs == {"collector:mail", "collector:eclass"}
+
+
+async def test_eclass_runs_without_a_google_account(scheduler):
+    """Google을 연결하지 않아도 eClass는 돌아야 한다. 예전에는 함께 꺼졌다."""
+    jobs = collector_jobs(scheduler, mail_minutes=10, google_ready=False, eclass=ECLASS_ON)
+    assert jobs == {"collector:eclass"}
+
+
+async def test_eclass_runs_with_mail_collection_turned_off(scheduler):
+    jobs = collector_jobs(scheduler, mail_minutes=0, google_ready=True, eclass=ECLASS_ON)
+    assert jobs == {"collector:eclass"}
+
+
+async def test_mail_runs_without_eclass(scheduler):
+    jobs = collector_jobs(scheduler, mail_minutes=10, google_ready=True, eclass=ECLASS_OFF)
+    assert jobs == {"collector:mail"}
+
+
+async def test_neither_is_registered_when_both_are_off(scheduler):
+    jobs = collector_jobs(scheduler, mail_minutes=0, google_ready=False, eclass=ECLASS_OFF)
+    assert jobs == set()
 
 
 def runtime_settings(tmp_path) -> Settings:

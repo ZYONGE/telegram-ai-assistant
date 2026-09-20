@@ -218,7 +218,24 @@ def _add_collector_jobs(
     google: GoogleAccounts,
     eclass_collector: EclassCollector | None = None,
 ) -> None:
-    """수집기 주기 작업. 조용한 시간에는 돌리지 않는다 (알림도 어차피 보류된다)."""
+    """수집기 주기 작업.
+
+    수집기는 서로 독립이다. **한쪽이 꺼져 있어도 다른 쪽은 등록되어야 한다** —
+    예전에는 메일 조건에서 일찍 빠져나가는 바람에 Google을 연결하지 않으면
+    eClass 수집까지 함께 꺼졌다.
+    """
+    _add_mail_job(scheduler, settings, ingestor, mail_collector, google)
+    _add_eclass_job(scheduler, settings, ingestor, eclass_collector)
+
+
+def _add_mail_job(
+    scheduler: AsyncIOScheduler,
+    settings: Settings,
+    ingestor: Ingestor,
+    mail_collector: MailCollector,
+    google: GoogleAccounts,
+) -> None:
+    """메일 수집. 조용한 시간에는 돌리지 않는다 (알림도 어차피 보류된다)."""
     minutes = settings.mail.poll_minutes
     if minutes <= 0 or not google.ready:
         logger.info("메일 수집을 켜지 않았습니다 (설정 %d분, 계정 연결 %s)", minutes, google.ready)
@@ -240,6 +257,14 @@ def _add_collector_jobs(
     )
     logger.info("메일 수집: %d분마다 (%02d시~%02d시)", minutes, start.hour, end.hour)
 
+
+def _add_eclass_job(
+    scheduler: AsyncIOScheduler,
+    settings: Settings,
+    ingestor: Ingestor,
+    eclass_collector: EclassCollector | None,
+) -> None:
+    """eClass 수집. 학교 주소와 계정만 있으면 켜지고, Google 연동과는 상관이 없다."""
     if eclass_collector is None or not settings.eclass.enabled:
         logger.info("eClass 수집을 켜지 않았습니다 (주소와 계정이 필요합니다)")
         return
@@ -260,6 +285,7 @@ def _add_collector_jobs(
         coalesce=True,
         max_instances=1,
     )
+    start, end = settings.notification.quiet_end, settings.notification.quiet_start
     logger.info("eClass 수집: %d분마다 (%02d시~%02d시)", settings.eclass.poll_minutes, start.hour, end.hour)
 
 

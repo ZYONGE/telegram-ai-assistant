@@ -24,14 +24,16 @@
 - 한 일: 이 문서 생성. `CLAUDE.md` 10절과 `docs/progress.md`가 이 문서를 가리키게 했고, `progress.md`에 흩어져 있던 다음 작업 목록을 여기로 옮겼다.
 
 ### T-02 eClass 수집을 Google 연동에서 떼어 내기
-- 상태: 대기
+- 상태: 코드 완료 (2026-09-20) · **테스트 확인 대기 (윈도우 PC)** — `py -3.14 -m uv run pytest tests/test_main.py`
+- 한 일: `_add_collector_jobs`를 `_add_mail_job` / `_add_eclass_job`으로 나눴다. 테스트 5개 추가 (`tests/test_main.py`): 둘 다 등록 / Google 미연결 / 메일 끔 / eClass 끔 / 둘 다 끔.
 - 목표: 메일 수집이 꺼져 있거나 Google 계정이 연결되지 않아도 eClass 수집이 예약되게 한다.
 - 문제: `app/main.py`의 `_add_collector_jobs`가 메일 조건(`poll_minutes <= 0 or not google.ready`)에서 일찍 빠져나가는 바람에, 그 아래 eClass 작업 등록까지 건너뛴다. 지금은 Google이 연결돼 있어 드러나지 않는 잠복 결함이다.
 - 손댈 곳: `app/main.py` (`_add_collector_jobs` → `_add_mail_job` / `_add_eclass_job` 분리), `tests/test_main.py`
 - 완료 기준: Google 미연결 + 메일 `poll_minutes = 0`인 상태에서 `collector:eclass` 작업이 등록되는지 확인하는 테스트가 통과한다. 기존 테스트 전부 통과.
 
 ### T-03 시스템 프롬프트 최신화 (v0.7)
-- 상태: 대기
+- 상태: 코드 완료 (2026-09-20) · **테스트 확인 대기 (윈도우 PC)** — `py -3.14 -m uv run pytest`
+- 한 일: v0.7로 올리고 "할 수 있는 일"에 eClass 항목을 넣었다. **비서가 eClass를 그 자리에서 열어 보는 도구는 아직 없다**는 점을 명시해, 이미 들어온 할 일로만 답하고 공지·쪽지는 준비 중이라고 말하게 했다. "준비 중" 문장은 인턴·교환학생만 남겼다. `CLAUDE.md` 9절 판 번호도 v0.7로.
 - 목표: 비서가 이미 되는 일을 "준비 중"이라고 답하지 않게 한다.
 - 문제: `prompts/system_prompt.md`의 "eClass와 인턴 공고 감시는 아직 준비 중입니다" 줄이 낡았다. eClass 과제·시험·온라인 강의는 이미 할 일로 들어온다.
 - 손댈 곳: `prompts/system_prompt.md` ("할 수 있는 일" 절, 판 번호 v0.6 → v0.7)
