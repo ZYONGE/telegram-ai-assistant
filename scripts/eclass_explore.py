@@ -27,6 +27,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from bs4 import BeautifulSoup
 
+from app.collectors.eclass.parse import parse_course_select
 from app.collectors.eclass.session import COURSE_LIST_PATH, MAIN_PATH, TODO_PATH, EclassError, EclassSession
 from app.core.clock import KST
 from app.core.config import PRIVATE_DIR, load_settings
@@ -50,17 +51,30 @@ MAX_SAMPLE_BYTES = 400_000
 UNSAFE_WORDS = (
     "submit", "insert", "update", "delete", "remove", "save", "modify", "write",
     "regist", "apply", "cancel", "upload", "proc", "exec", "logout",
-    "download", "filedown", "down_load", "attach",
+    # 내려받기는 어떤 꼴이든 막는다 (down_load·filedown·file_down 모두)
+    "down", "attach",
 )
 # 이 꼴의 주소만 연다 (eClass 화면은 전부 .acl이다)
 SCREEN_SUFFIX = ".acl"
+# 인라인 스크립트에서 주운 주소는 이 꼴만 따라간다. 메뉴는 대개 스크립트 안에 있지만,
+# 거기에는 읽기만 하는 주소와 무언가를 바꾸는 주소가 섞여 있다.
+READING_TAILS = ("_form.acl", "_list.acl", "_view.acl")
+
+# 과목방은 열쇠(KJKEY)를 넘겨 문을 연 뒤에야 방 화면이 나온다 (2026-09-20 실제 확인)
+COURSE_ENTER_PATH = "/ilos/st/course/eclass_room2.acl"
+COURSE_ROOM_PATH = "/ilos/st/course/submain_form.acl"
+# 과목방 안에서만 뜻이 있는 화면. 방 밖에서 열면 빈 껍데기가 온다.
+COURSE_PREFIX = "/ilos/st/course/"
+# 메뉴 구조는 과목마다 같다. 다만 비어 있는 과목이 있어 둘까지 본다.
+MAX_COURSES = 2
 
 _ACL_IN_SCRIPT = re.compile(r"""['"]((?:\.{0,2}/)?[\w./-]*\.acl[^'"]*)['"]""")
+# 목록 화면은 껍데기(_form.acl)가 내용(같은 이름에서 _form을 뺀 주소)을 따로 불러온다.
+# 할 일 화면에서 확인한 구조이고, 공지에서도 같았다 (2026-09-20).
+_SHELL_SUFFIX = "_form.acl"
 _DATE = re.compile(r"\d{4}[.\-/]\d{1,2}[.\-/]\d{1,2}")
 _DUE_WORDS = ("마감", "기한", "제출", "마감일")
 _DATE_WORDS = ("날짜", "등록일", "작성일", "게시일", "기간")
-# 글 하나를 가리키는 번호. 목록형 화면인지 가리는 실마리.
-_ARTICLE_ID = re.compile(r"(ARTL_NUM|SEQ|IDX|NUM)=\d+", re.IGNORECASE)
 # 과목마다 따로 있는 화면의 실마리
 _COURSE_PARAMS = ("kjkey", "ky", "kj")
 
@@ -100,6 +114,9 @@ class Screen:
     has_due: bool = False
     per_course: bool = False
     sample: str = ""
+    # 껍데기가 따로 불러오는 내용 주소. 파서는 이쪽을 읽어야 한다.
+    data_path: str = ""
+    data_sample: str = ""
     note: str = ""
 
 
@@ -128,8 +145,12 @@ def normalize(href: str) -> Candidate | None:
     return Candidate(name="", path=path, query=parts.query)
 
 
-def collect_links(html: str) -> list[Candidate]:
-    """화면 안의 링크를 모은다. eClass는 onclick으로 넘어가는 메뉴가 많아 둘 다 본다."""
+def collect_links(html: str, *, with_scripts: bool = True) -> list[Candidate]:
+    """화면 안의 링크를 모은다. eClass는 onclick으로 넘어가는 메뉴가 많아 둘 다 본다.
+
+    머리글 스크립트는 모든 화면에 똑같이 들어 있다. 그래서 스크립트 훑기는
+    메뉴가 있는 첫 화면에서만 한다. 안 그러면 같은 주소를 끝없이 다시 찾는다.
+    """
     soup = BeautifulSoup(html, "html.parser")
     found: dict[str, Candidate] = {}
 
@@ -149,6 +170,14 @@ def collect_links(html: str) -> list[Candidate]:
         for match in _ACL_IN_SCRIPT.findall(script):
             remember(normalize(match), name)
 
+    # 메뉴를 인라인 스크립트에서 만드는 화면이 많다. 다만 거기에는 바꾸는 주소도 섞여 있어
+    # 읽기만 하는 꼴(_form·_list·_view)만 따라간다.
+    for node in soup.find_all("script") if with_scripts else []:
+        for match in _ACL_IN_SCRIPT.findall(node.get_text()):
+            candidate = normalize(match)
+            if candidate is not None and candidate.path.endswith(READING_TAILS):
+                remember(candidate, "")
+
     return list(found.values())
 
 
@@ -157,7 +186,8 @@ def describe(html: str) -> Shape:
     soup = BeautifulSoup(html, "html.parser")
     text = soup.get_text(" ", strip=True)
 
-    rows = [row for row in soup.select("tr") if _ARTICLE_ID.search(str(row))]
+    # 칸이 둘 이상인 줄만 센다. "조회할 자료가 없습니다"는 칸 하나를 늘려 쓰므로 저절로 빠진다.
+    rows = [row for row in soup.select("tr") if len(row.select("td")) >= 2]
     if not rows:
         # 표가 아니라 칸으로 된 목록도 있다 (할 일 화면이 그렇다)
         rows = [block for block in soup.select("[class*=list] [onclick], .todo_wrap") if block.get_text(strip=True)]
@@ -178,6 +208,23 @@ def sample_name(path: str) -> str:
     return re.sub(r"[^\w.-]", "_", tail).removesuffix(".acl") or "screen"
 
 
+def data_path(html: str, path: str) -> str:
+    """껍데기 화면이 따로 불러오는 내용 주소.
+
+    목록 화면은 `..._list_form.acl`이 빈 틀만 주고, 줄은 `..._list.acl`을 다시 불러 채운다.
+    파서가 읽어야 할 곳은 이쪽이므로 껍데기 안에서 그 주소가 실제로 불리는지 확인해 둔다.
+    """
+    if path.endswith(_SHELL_SUFFIX):
+        guess = path[: -len(_SHELL_SUFFIX)] + SCREEN_SUFFIX
+        if guess in html and safe_path(guess):
+            return guess
+    # 자기 자신에게 다시 요청해야 줄이 채워지는 화면도 있다 (쪽지함·학사일정)
+    soup = BeautifulSoup(html, "html.parser")
+    if any((form.get("action") or "").endswith(path) for form in soup.find_all("form")):
+        return path
+    return ""
+
+
 def param_names(query: str) -> list[str]:
     """질의 문자열에서 이름만 꺼낸다. 값은 개인 정보일 수 있어 버린다."""
     return sorted(parse_qs(query, keep_blank_values=True))
@@ -187,24 +234,100 @@ def is_per_course(params: list[str]) -> bool:
     return any(name.lower() in _COURSE_PARAMS for name in params)
 
 
+async def course_keys(session) -> list[str]:
+    """수강 중인 과목의 방 열쇠. 할 일 화면의 과목 선택 상자에서 읽는다."""
+    html = await session.open(TODO_PATH)
+    return [row.kjkey for row in parse_course_select(html).rows]
+
+
+async def enter_course(session, key: str) -> None:
+    """과목방 문을 연다. 열쇠를 넘겨 그 과목을 현재 방으로 삼을 뿐, 아무것도 바꾸지 않는다."""
+    await session.post(
+        COURSE_ENTER_PATH,
+        {"KJKEY": key, "returnData": "json", "returnURI": COURSE_ROOM_PATH, "encoding": "utf-8"},
+    )
+
+
 async def explore(
     session,
     sample_dir: Path,
     *,
     seeds: tuple[str, ...] = SEEDS,
+    courses: tuple[str, ...] = (),
     max_depth: int = MAX_DEPTH,
     max_screens: int = MAX_SCREENS,
+    max_courses: int = MAX_COURSES,
     pause: float = PAUSE_SECONDS,
 ) -> list[Screen]:
-    """메뉴를 따라가며 화면을 열어 보고 카탈로그를 만든다. 로그인은 부른 쪽이 해 둔다."""
+    """메뉴를 따라가며 화면을 열어 보고 카탈로그를 만든다. 로그인은 부른 쪽이 해 둔다.
+
+    두 바퀴를 돈다. 먼저 공통 화면을, 그다음 과목방 안을 본다.
+    과목방은 어느 과목이나 메뉴가 같으므로 한 과목만 들어간다.
+    """
     sample_dir.mkdir(parents=True, exist_ok=True)
-    queue: list[tuple[Candidate, int]] = [(Candidate(name="", path=path), 0) for path in seeds]
-    visited: set[str] = set()
+    common: set[str] = set()
+    screens = await _crawl(
+        session,
+        sample_dir,
+        [(Candidate(name="", path=path), 0) for path in seeds],
+        max_depth=max_depth,
+        max_screens=max_screens,
+        pause=pause,
+        seen=common,
+        skip_prefix=COURSE_PREFIX,
+    )
+
+    for key in list(courses)[:max_courses]:
+        try:
+            await enter_course(session, key)
+        except EclassError as exc:
+            logger.warning("과목방에 들어가지 못했습니다 (%s)", exc.reason)
+            screens.append(
+                Screen(name="과목방", path=COURSE_ROOM_PATH, per_course=True, note=f"들어가지 못함({exc.reason})")
+            )
+            continue
+        screens += await _crawl(
+            session,
+            sample_dir,
+            [(Candidate(name="과목방", path=COURSE_ROOM_PATH), 0)],
+            max_depth=max_depth,
+            max_screens=max_screens,
+            pause=pause,
+            per_course=True,
+            prefix="course_",
+            # 과목방에도 공통 머리글 메뉴가 그대로 들어 있다. 이미 본 것은 다시 열지 않는다.
+            seen=common - {COURSE_ROOM_PATH},
+        )
+
+    return screens
+
+
+async def _crawl(
+    session,
+    sample_dir: Path,
+    queue: list[tuple[Candidate, int]],
+    *,
+    max_depth: int,
+    max_screens: int,
+    pause: float,
+    per_course: bool = False,
+    prefix: str = "",
+    seen: set[str] | None = None,
+    skip_prefix: str = "",
+) -> list[Screen]:
+    """대기줄을 비울 때까지 화면을 열어 본다. 같은 경로는 한 번만 연다.
+
+    `seen`을 넘기면 그 경로는 건너뛰고, 새로 연 경로를 거기에 담아 돌려준다.
+    """
+    visited: set[str] = seen if seen is not None else set()
     screens: list[Screen] = []
 
     while queue and len(screens) < max_screens:
         candidate, depth = queue.pop(0)
         if candidate.path in visited or not safe_path(candidate.path):
+            continue
+        if skip_prefix and candidate.path.startswith(skip_prefix):
+            # 여기서 열면 빈 껍데기만 남는다. 뒤에 과목방 안에서 연다.
             continue
         visited.add(candidate.path)
 
@@ -212,13 +335,35 @@ async def explore(
             html = await session.open(candidate.target)
         except EclassError as exc:
             logger.warning("열지 못함: %s (%s)", candidate.path, exc.reason)
-            screens.append(Screen(name=candidate.name, path=candidate.path, note=f"열리지 않음({exc.reason})"))
+            screens.append(
+                Screen(
+                    name=candidate.name,
+                    path=candidate.path,
+                    per_course=per_course,
+                    note=f"열리지 않음({exc.reason})",
+                )
+            )
             continue
 
         params = param_names(candidate.query)
         shape = describe(html)
-        sample = f"{sample_name(candidate.path)}.html"
+        sample = f"{prefix}{sample_name(candidate.path)}.html"
         (sample_dir / sample).write_text(html[:MAX_SAMPLE_BYTES], encoding="utf-8")
+
+        # 껍데기라면 내용까지 받아 둔다. 줄 수와 생김새는 그쪽이 진짜다.
+        inner = data_path(html, candidate.path)
+        data_sample = ""
+        note = ""
+        if inner:
+            try:
+                data_html = await session.post(inner, {})
+            except EclassError as exc:
+                note = f"내용 주소를 받지 못함({exc.reason})"
+            else:
+                data_sample = f"{prefix}{sample_name(inner)}__data.html"
+                (sample_dir / data_sample).write_text(data_html[:MAX_SAMPLE_BYTES], encoding="utf-8")
+                shape = describe(data_html)
+
         screens.append(
             Screen(
                 name=candidate.name,
@@ -228,14 +373,17 @@ async def explore(
                 items=shape.items,
                 has_date=shape.has_date,
                 has_due=shape.has_due,
-                per_course=is_per_course(params),
+                per_course=per_course or is_per_course(params),
                 sample=sample,
+                data_path=inner,
+                data_sample=data_sample,
+                note=note,
             )
         )
-        logger.info("%s %s (%d줄)", "목록" if shape.listing else "화면", candidate.path, shape.items)
+        logger.info("%s %s (%d줄)%s", "목록" if shape.listing else "화면", candidate.path, shape.items, f" ← {inner}" if inner else "")
 
         if depth < max_depth:
-            for link in collect_links(html):
+            for link in collect_links(html, with_scripts=depth == 0):
                 if link.path not in visited:
                     queue.append((link, depth + 1))
         if pause:
@@ -262,15 +410,18 @@ def summary(screens: list[Screen]) -> str:
             for mark, on in (("날짜", screen.has_date), ("마감", screen.has_due), ("과목별", screen.per_course))
             if on
         )
-        lines.append(f"  {screen.items:>3}줄  {screen.name or '(이름 없음)'} · {screen.path} {marks}".rstrip())
-    unopened = [screen for screen in screens if screen.note]
-    if unopened:
-        lines += ["", f"열리지 않은 화면 {len(unopened)}개:"]
-        lines += [f"  {screen.path} — {screen.note}" for screen in unopened]
+        target = screen.data_path or screen.path
+        lines.append(f"  {screen.items:>3}줄  {screen.name or '(이름 없음)'} · {target} {marks}".rstrip())
+    troubled = [screen for screen in screens if screen.note]
+    if troubled:
+        lines += ["", f"걸린 화면 {len(troubled)}개:"]
+        lines += [f"  {screen.path} · {screen.note}" for screen in troubled]
     return "\n".join(lines)
 
 
 async def main() -> int:
+    # 윈도우 콘솔 기본 인코딩(cp949)으로는 한글 밖의 기호에서 멈춘다
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     settings = load_settings().eclass
     if not settings.enabled:
@@ -281,7 +432,9 @@ async def main() -> int:
     await session.start()
     try:
         await session.ensure_login()
-        screens = await explore(session, SAMPLE_DIR)
+        keys = await course_keys(session)
+        logger.info("수강 과목 %d개", len(keys))
+        screens = await explore(session, SAMPLE_DIR, courses=tuple(keys))
     except EclassError as exc:
         print(f"탐색을 멈췄습니다: {exc}")
         return 1

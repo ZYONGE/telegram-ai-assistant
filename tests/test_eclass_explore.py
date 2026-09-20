@@ -16,6 +16,7 @@ from app.collectors.eclass.session import EclassError, Failure  # noqa: E402
 from scripts.eclass_explore import (  # noqa: E402
     Screen,
     collect_links,
+    data_path,
     describe,
     explore,
     is_per_course,
@@ -60,9 +61,17 @@ class FakeSession:
         self.pages = pages
         self.broken = broken or set()
         self.opened: list[str] = []
+        self.posted: list[str] = []
 
     async def open(self, target: str) -> str:
         self.opened.append(target)
+        return self._page(target)
+
+    async def post(self, target: str, data: dict) -> str:
+        self.posted.append(target)
+        return self._page(target)
+
+    def _page(self, target: str) -> str:
         path = urlsplit(target).path
         if path in self.broken:
             raise EclassError(Failure.NETWORK, "연결 실패")
@@ -274,3 +283,104 @@ def test_the_summary_lists_the_screens_worth_reading():
     ]
     text = summary(screens)
     assert "공지사항" in text and "목록형 1개" in text
+
+
+# --- 껍데기와 내용 ---
+
+SHELL_HTML = """
+<div id="notice_list"></div>
+<script>
+  function load() {
+    $.ajax({url: '/ilos/community/notice_list.acl', type: 'POST'});
+  }
+</script>
+"""
+
+
+def test_a_shell_screen_points_at_its_content():
+    assert data_path(SHELL_HTML, "/ilos/community/notice_list_form.acl") == "/ilos/community/notice_list.acl"
+
+
+def test_a_plain_screen_has_no_content_address():
+    assert data_path(NOTICE_HTML, "/ilos/community/notice_list_form.acl") == ""
+    assert data_path(SHELL_HTML, "/ilos/community/notice_view.acl") == ""
+
+
+def test_a_content_address_that_downloads_is_refused():
+    html = "<script>$.ajax({url: '/ilos/mp/file_down.acl'});</script>"
+    assert data_path(html, "/ilos/mp/file_down_form.acl") == ""
+
+
+async def test_exploring_reads_the_content_behind_the_shell(tmp_path):
+    session = FakeSession(
+        {
+            "/ilos/community/notice_list_form.acl": SHELL_HTML,
+            "/ilos/community/notice_list.acl": NOTICE_HTML,
+        }
+    )
+    screens = await explore(
+        session, tmp_path, seeds=("/ilos/community/notice_list_form.acl",), pause=0
+    )
+
+    screen = screens[0]
+    assert screen.data_path == "/ilos/community/notice_list.acl"
+    assert session.posted == ["/ilos/community/notice_list.acl"]
+    # 줄 수와 생김새는 껍데기가 아니라 내용에서 읽는다
+    assert screen.listing is True and screen.items == 2
+    assert (tmp_path / screen.data_sample).read_text(encoding="utf-8") == NOTICE_HTML
+
+
+async def test_content_that_will_not_load_is_written_down(tmp_path):
+    session = FakeSession(
+        {"/ilos/community/notice_list_form.acl": SHELL_HTML},
+        broken={"/ilos/community/notice_list.acl"},
+    )
+    screens = await explore(
+        session, tmp_path, seeds=("/ilos/community/notice_list_form.acl",), pause=0
+    )
+    assert "내용 주소를 받지 못함" in screens[0].note and screens[0].data_sample == ""
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/ilos/mp/file_down.acl", "/ilos/lo/filedown.acl", "/ilos/co/down_load.acl"],
+)
+def test_downloads_are_blocked_in_every_spelling(path):
+    assert safe_path(path) is False
+
+
+def test_a_no_data_row_is_not_counted():
+    """'조회할 자료가 없습니다'는 칸 하나를 늘려 쓰므로 줄로 세지 않는다."""
+    html = """
+    <table>
+      <tr><th>번호</th><th>제목</th><th>공개일</th></tr>
+      <tr><td colspan="3">조회할 자료가 없습니다</td></tr>
+    </table>
+    """
+    shape = describe(html)
+    assert shape.listing is False and shape.items == 0
+
+
+def test_rows_are_counted_without_an_article_number():
+    """줄마다 글번호가 붙지 않는 화면도 있다 (쪽지함·과제 목록)."""
+    html = """
+    <table>
+      <tr><th>보낸사람</th><th>제목</th><th>날짜</th></tr>
+      <tr><td>홍길동</td><td onclick="viewMsg(1)">안내드립니다</td><td>2026.09.19</td></tr>
+      <tr><td>김철수</td><td onclick="viewMsg(2)">확인 바랍니다</td><td>2026.09.20</td></tr>
+    </table>
+    """
+    shape = describe(html)
+    assert shape.listing is True and shape.items == 2 and shape.has_date is True
+
+
+async def test_course_room_screens_wait_for_the_room(tmp_path):
+    """과목방 안에서만 뜻이 있는 화면은 방 밖에서 열지 않는다."""
+    session = FakeSession(
+        {"/ilos/main/main_form.acl": '<a href="/ilos/st/course/report_list.acl">과제</a>'}
+    )
+    screens = await explore(
+        session, tmp_path, seeds=("/ilos/main/main_form.acl",), pause=0
+    )
+    assert not any("report_list" in target for target in session.opened)
+    assert [screen.path for screen in screens] == ["/ilos/main/main_form.acl"]
