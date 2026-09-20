@@ -42,6 +42,9 @@ class NotificationSettings:
     quiet_end: time = time(6, 30)
     # 브리핑을 제외한 선제 알림의 하루 최대 건수 (사용자가 요청한 리마인더는 세지 않음)
     daily_limit: int = 5
+    # 수집 실패가 같은 원인으로 이어질 때 몇 시간마다 다시 알릴지. 0이면 한 번만 알린다.
+    # 같은 소식을 되풀이하지 않는 것이 기본이지만, 며칠째 수집이 안 되는 것은 계속 알려야 한다.
+    failure_repeat_hours: int = 6
 
 
 @dataclass(frozen=True, slots=True)
@@ -332,6 +335,9 @@ def load_settings(
                 quiet_start=_time(notification, "quiet_start", n_default.quiet_start),
                 quiet_end=_time(notification, "quiet_end", n_default.quiet_end),
                 daily_limit=int(notification.get("daily_limit", n_default.daily_limit)),
+                failure_repeat_hours=int(
+                    notification.get("failure_repeat_hours", n_default.failure_repeat_hours)
+                ),
             ),
             storage=StorageSettings(
                 db_path=path(storage["db_path"]),

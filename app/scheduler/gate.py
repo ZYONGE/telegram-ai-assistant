@@ -3,6 +3,8 @@
 판단 순서
 1. 이미 처리한 이벤트(같은 ref_id) → drop
    단, 보류 시각이 지났거나 즉시 발송에 실패한 이벤트는 다시 판단한다
+   수집 실패는 원인이 이어지면 정해진 간격(기본 6시간)으로 다시 알린다.
+   며칠째 수집이 안 되는데 조용한 것이 가장 나쁘다
 2. 조용한 시간(기본 23:00~06:30 KST) → hold, 조용한 시간이 끝나는 시각에 다시 판단
    사용자가 직접 요청한 알림은 예외
 3. 사용자가 요청한 알림, 정해진 브리핑 → send_now (일일 상한에 세지 않음)
@@ -27,7 +29,7 @@ class RuleBasedGate:
     async def decide(self, event: Event, now: datetime) -> GateDecision:
         require_aware(now, "now")
         previous = await self._log.get(event.ref_id)
-        if previous is not None and not _needs_redecision(previous, now):
+        if previous is not None and not self._needs_redecision(event, previous, now):
             return GateDecision(GateAction.DROP, "이미 처리한 이벤트")
 
         if not event.user_requested and self.in_quiet_hours(now):
@@ -47,6 +49,22 @@ class RuleBasedGate:
 
         return GateDecision(GateAction.BATCH, "다음 브리핑에 묶음")
 
+    def _needs_redecision(self, event: Event, previous: NotificationRecord, now: datetime) -> bool:
+        if _unfinished(previous, now):
+            return True
+        # 수집이 며칠째 안 되는데 조용한 것이 가장 나쁘다. 원인이 이어지면 정해진 간격으로 다시 알린다.
+        return (
+            event.kind == EventKind.COLLECTOR_FAILED
+            and previous.sent_at is not None
+            and self._repeat_after is not None
+            and now - previous.sent_at >= self._repeat_after
+        )
+
+    @property
+    def _repeat_after(self) -> timedelta | None:
+        hours = self._settings.failure_repeat_hours
+        return timedelta(hours=hours) if hours > 0 else None
+
     def in_quiet_hours(self, now: datetime) -> bool:
         current = to_kst(now).time()
         start, end = self._settings.quiet_start, self._settings.quiet_end
@@ -62,7 +80,8 @@ class RuleBasedGate:
         return release.astimezone(UTC)
 
 
-def _needs_redecision(previous: NotificationRecord, now: datetime) -> bool:
+def _unfinished(previous: NotificationRecord, now: datetime) -> bool:
+    """아직 보내지 못한 알림인지. 보류가 풀렸거나 발송에 실패한 것은 다시 판단한다."""
     if previous.sent_at is not None:
         return False
     if previous.action is GateAction.HOLD:

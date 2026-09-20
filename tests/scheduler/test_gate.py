@@ -1,9 +1,15 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 
+from app.core.config import NotificationSettings
+from app.core.events import collector_failed
 from app.core.interfaces import GateAction, GateDecision
+from app.scheduler.gate import RuleBasedGate
 from tests.conftest import kst, make_event
+
+# 낮 시간. 조용한 시간에 걸리지 않게 한다.
+DAY = kst(9, 17, 14)
 
 
 async def test_urgent_event_in_daytime_is_sent_now(gate):
@@ -105,3 +111,50 @@ async def test_user_requested_reminder_ignores_daily_limit(gate, log):
 async def test_naive_now_is_rejected(gate):
     with pytest.raises(ValueError):
         await gate.decide(make_event(), datetime(2026, 9, 17, 14))
+
+
+# --- 수집 실패 되풀이 알림 ---
+
+
+async def test_a_failure_that_keeps_happening_is_told_about_again(gate, log):
+    """며칠째 수집이 안 되는데 조용한 것이 가장 나쁘다."""
+    event = collector_failed("eclass", "login", "로그인 실패")
+    first = await gate.decide(event, DAY)
+    await log.save_decision(event, first, DAY)
+    await log.mark_sent(event.ref_id, DAY)
+
+    # 6시간이 지나기 전에는 조용하다
+    soon = await gate.decide(event, DAY + timedelta(hours=5))
+    assert soon.action is GateAction.DROP
+
+    again = await gate.decide(event, DAY + timedelta(hours=7))
+    assert again.action is not GateAction.DROP
+
+
+async def test_a_failure_we_already_told_about_stays_quiet_for_a_while(gate, log):
+    event = collector_failed("eclass", "login", "로그인 실패")
+    decision = await gate.decide(event, DAY)
+    await log.save_decision(event, decision, DAY)
+    await log.mark_sent(event.ref_id, DAY)
+
+    assert (await gate.decide(event, DAY + timedelta(minutes=30))).action is GateAction.DROP
+
+
+async def test_other_news_is_never_repeated(gate, log):
+    """공지는 한 번이면 된다. 되풀이하는 것은 수집 실패뿐이다."""
+    event = make_event("notice-1")
+    decision = await gate.decide(event, DAY)
+    await log.save_decision(event, decision, DAY)
+    await log.mark_sent(event.ref_id, DAY)
+
+    assert (await gate.decide(event, DAY + timedelta(days=3))).action is GateAction.DROP
+
+
+async def test_repeating_can_be_turned_off(log):
+    off = RuleBasedGate(log, NotificationSettings(failure_repeat_hours=0))
+    event = collector_failed("eclass", "login", "로그인 실패")
+    decision = await off.decide(event, DAY)
+    await log.save_decision(event, decision, DAY)
+    await log.mark_sent(event.ref_id, DAY)
+
+    assert (await off.decide(event, DAY + timedelta(days=2))).action is GateAction.DROP
