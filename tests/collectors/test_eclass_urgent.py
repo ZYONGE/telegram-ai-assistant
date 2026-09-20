@@ -4,6 +4,8 @@
 **애매하면 즉시 알리지 않는다.** 놓치는 것보다 잘못 울리는 쪽이 더 성가시다.
 """
 
+from pathlib import Path
+
 import pytest
 
 from app.collectors.eclass.urgent import BODY_WINDOW, is_urgent
@@ -52,7 +54,31 @@ def test_an_empty_word_list_never_calls_anything_urgent():
     assert is_urgent("휴강 안내", words=()) is False
 
 
-def test_the_words_can_be_changed_in_the_settings():
-    """개인정보가 아니라서 config.toml에 둔다."""
-    assert load_settings().eclass.urgent_words == DEFAULT_URGENT_WORDS
-    assert is_urgent("특강 안내", words=("특강",)) is True
+CONFIG = """
+[telegram]
+bot_token = "t"
+allowed_user_id = "1"
+
+[storage]
+db_path = "x.db"
+"""
+
+
+def write_config(tmp_path, extra: str = "") -> Path:
+    path = tmp_path / "config.toml"
+    path.write_text(CONFIG + extra, encoding="utf-8")
+    return path
+
+
+def test_the_words_can_be_changed_in_the_settings(tmp_path):
+    """개인정보가 아니라서 config.toml에 둔다. 기기에 있는 설정을 읽지 않는다."""
+    config = write_config(tmp_path, '\n[eclass]\nurgent_words = ["특강"]\n')
+    settings = load_settings(config, env={}, local_path=tmp_path / "없음.toml")
+
+    assert settings.eclass.urgent_words == ("특강",)
+    assert is_urgent("특강 안내", words=settings.eclass.urgent_words) is True
+
+
+def test_the_default_words_are_used_when_nothing_is_set(tmp_path):
+    settings = load_settings(write_config(tmp_path), env={}, local_path=tmp_path / "없음.toml")
+    assert settings.eclass.urgent_words == DEFAULT_URGENT_WORDS
