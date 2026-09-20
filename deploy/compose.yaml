@@ -1,0 +1,30 @@
+# 서버에서 비서를 띄운다.
+#
+#   cd ~/telegram-ai-assistant
+#   docker compose -f deploy/compose.yaml up -d --build
+#
+# - 개인 파일은 볼륨으로만 들어간다. 이미지에는 들어 있지 않다 (절대 규칙 12).
+# - 밖에서 들어오는 요청이 없다. 포트를 열지 않는다 (텔레그램에 봇이 접속하는 폴링 방식).
+# - 서버가 다시 켜지거나 봇이 죽으면 알아서 다시 올라온다.
+
+services:
+  assistant:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: telegram-ai-assistant:latest
+    container_name: assistant
+    restart: unless-stopped
+    # .env·프로필·지시·DB·기억·브라우저 세션이 모두 여기 들어 있다
+    volumes:
+      - ../private:/app/private
+    environment:
+      TZ: Asia/Seoul
+    # 크로미움이 /dev/shm을 크게 쓴다. 기본 64MB로는 화면을 여는 도중 죽는다.
+    shm_size: 512mb
+    # 로그가 디스크를 채우지 않게 돌려 쓴다
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"

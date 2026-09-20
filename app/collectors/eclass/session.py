@@ -121,7 +121,9 @@ class EclassSession:
             raise EclassError(Failure.LAYOUT, "playwright가 설치되어 있지 않습니다.") from exc
 
         self._playwright = await async_playwright().start()
-        self._browser = await self._playwright.chromium.launch(headless=True)
+        self._browser = await self._playwright.chromium.launch(
+            headless=True, args=list(self.settings.browser_args)
+        )
         state = self.settings.session_file
         self._context = await self._browser.new_context(
             storage_state=str(state) if state.exists() else None,

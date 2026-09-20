@@ -157,6 +157,9 @@ class EclassSettings:
     scope: ScopePolicy = ScopePolicy()
     # 이 낱말이 공지에 있으면 즉시 알린다 (app/collectors/eclass/urgent.py)
     urgent_words: tuple[str, ...] = DEFAULT_URGENT_WORDS
+    # 브라우저를 띄울 때 넘길 인자. 컨테이너 안에서는 크로미움 자체 격리가 막혀
+    # --no-sandbox가 필요할 수 있다. 기기마다 달라 private/local.toml에 둔다.
+    browser_args: tuple[str, ...] = ()
 
     @property
     def enabled(self) -> bool:
@@ -342,6 +345,7 @@ def load_settings(
                 scope_file=path(eclass.get("scope_file", str(PRIVATE_DIR / "eclass_scope.json"))),
                 scope=_scope(eclass.get("scope", {})),
                 urgent_words=tuple(str(word) for word in eclass.get("urgent_words", DEFAULT_URGENT_WORDS)),
+                browser_args=tuple(str(arg) for arg in eclass.get("browser_args", ())),
             ),
             mail=MailSettings(
                 poll_minutes=int(mail.get("poll_minutes", 10)),

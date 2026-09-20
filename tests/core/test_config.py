@@ -141,3 +141,18 @@ def test_merge_settings_keeps_nested_values():
     merged = merge_settings(base, {"llm": {"gemini": {"project": "p"}}})
     assert merged == {"llm": {"provider": "gemini", "gemini": {"backend": "api_key", "project": "p"}}, "a": 1}
     assert base["llm"]["gemini"]["project"] == ""
+
+
+ENV = {"TOKEN": "abc:123", "USER_ID": "42"}
+
+
+def test_browser_args_can_be_set_for_a_container(tmp_path):
+    """컨테이너 안에서는 크로미움 자체 격리가 막혀 --no-sandbox가 필요할 수 있다."""
+    config = write_config(tmp_path, CONFIG + '\n[eclass]\nbrowser_args = ["--no-sandbox"]\n')
+    settings = load_settings(config, env=ENV, local_path=tmp_path / "없음.toml")
+    assert settings.eclass.browser_args == ("--no-sandbox",)
+
+
+def test_browser_args_are_empty_by_default(tmp_path):
+    settings = load_settings(write_config(tmp_path), env=ENV, local_path=tmp_path / "없음.toml")
+    assert settings.eclass.browser_args == ()

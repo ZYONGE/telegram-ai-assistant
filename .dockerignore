@@ -1,0 +1,19 @@
+# 개인정보와 비밀값은 이미지에 넣지 않는다. 볼륨으로만 붙인다 (CLAUDE.md 절대 규칙 12).
+private/
+.env
+.env.*
+
+# 참고 오픈소스 클론
+refs/
+
+# 개발용
+.venv/
+.git/
+.github/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+tests/
+docs/
+scripts/
+templates/
