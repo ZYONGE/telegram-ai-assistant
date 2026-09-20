@@ -12,6 +12,7 @@ import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import time
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -91,6 +92,28 @@ class GoogleSettings:
     scopes: tuple[str, ...] = ()
 
 
+class Level(StrEnum):
+    """eClass 화면 하나를 어떻게 다룰지 (app/collectors/eclass/scope.py)."""
+
+    NOTIFY = "notify"  # 알림 게이트를 거쳐 알린다 (급하면 즉시)
+    BRIEF = "brief"  # 브리핑에만 넣는다
+    STORE = "store"  # 저장만 하고, 물어보면 답한다
+    OFF = "off"  # 건드리지 않는다
+
+
+@dataclass(frozen=True, slots=True)
+class ScopePolicy:
+    """무엇을 어느 수준으로 볼지. 낱말 목록이라 개인을 알아볼 수 있는 값이 없다."""
+
+    unknown: Level = Level.OFF
+    notify_paths: tuple[str, ...] = ()
+    store_paths: tuple[str, ...] = ()
+    off_paths: tuple[str, ...] = ()
+    notify_words: tuple[str, ...] = ()
+    store_words: tuple[str, ...] = ()
+    off_words: tuple[str, ...] = ()
+
+
 @dataclass(frozen=True, slots=True)
 class EclassSettings:
     """학교 eClass 수집 설정.
@@ -110,6 +133,11 @@ class EclassSettings:
     stale_hours: int = 12
     # 로그인 세션 저장 위치 (재로그인 횟수를 줄인다)
     session_file: Path = PRIVATE_DIR / "browser" / "eclass_session.json"
+    # 탐색기가 만든 화면 목록과, 화면마다 정해 둔 처리 수준 (둘 다 개인 파일)
+    catalog_file: Path = PRIVATE_DIR / "eclass_catalog.json"
+    scope_file: Path = PRIVATE_DIR / "eclass_scope.json"
+    # 어떤 화면을 어떻게 다룰지 정하는 규칙
+    scope: ScopePolicy = ScopePolicy()
 
     @property
     def enabled(self) -> bool:
@@ -291,6 +319,9 @@ def load_settings(
                 poll_minutes=int(eclass.get("poll_minutes", 90)),
                 stale_hours=int(eclass.get("stale_hours", 12)),
                 session_file=path(eclass.get("session_file", str(PRIVATE_DIR / "browser" / "eclass_session.json"))),
+                catalog_file=path(eclass.get("catalog_file", str(PRIVATE_DIR / "eclass_catalog.json"))),
+                scope_file=path(eclass.get("scope_file", str(PRIVATE_DIR / "eclass_scope.json"))),
+                scope=_scope(eclass.get("scope", {})),
             ),
             mail=MailSettings(
                 poll_minutes=int(mail.get("poll_minutes", 10)),
@@ -313,6 +344,34 @@ def load_settings(
 
 def _time(section: Mapping[str, Any], key: str, default: time) -> time:
     return time.fromisoformat(section[key]) if key in section else default
+
+
+def _scope(section: Mapping[str, Any]) -> ScopePolicy:
+    """eClass 화면을 어떻게 다룰지 정하는 규칙. 낱말 목록이라 개인정보가 없다."""
+    default = ScopePolicy()
+
+    def words(key: str, fallback: tuple[str, ...]) -> tuple[str, ...]:
+        value = section.get(key)
+        if value is None:
+            return fallback
+        return tuple(str(item) for item in value)
+
+    try:
+        unknown = Level(str(section.get("unknown", default.unknown)))
+    except ValueError as exc:
+        raise ConfigError(
+            f"[eclass.scope] unknown은 {', '.join(str(level) for level in Level)} 중 하나여야 합니다."
+        ) from exc
+
+    return ScopePolicy(
+        unknown=unknown,
+        notify_paths=words("notify_paths", default.notify_paths),
+        store_paths=words("store_paths", default.store_paths),
+        off_paths=words("off_paths", default.off_paths),
+        notify_words=words("notify_words", default.notify_words),
+        store_words=words("store_words", default.store_words),
+        off_words=words("off_words", default.off_words),
+    )
 
 
 def _google(section: Mapping[str, Any], path: Any) -> GoogleSettings:

@@ -53,6 +53,22 @@ poll_minutes = 90
 # 이 시간 넘게 수집이 성공하지 못하면 알린다
 stale_hours = 12
 
+# 어떤 화면을 어떻게 다룰지 정하는 규칙 (app/collectors/eclass/scope.py).
+# 수준: notify(알림) · brief(브리핑에만) · store(저장만) · off(건드리지 않음)
+# 규칙에 안 걸린 화면만 가벼운 모델이 분류한다. 모델이 꺼져 있어도 수집은 돈다.
+# "게시판은 알리지 마"처럼 대화로 바꾼 것은 private/eclass_scope.json에 남고 이 규칙보다 앞선다.
+[eclass.scope]
+# 규칙과 모델 둘 다 정하지 못한 화면을 어떻게 둘지
+unknown = "off"
+# 경로로 먼저 정한다. 사이트 구조라 메뉴 이름보다 덜 흔들린다.
+notify_paths = ["notice", "notification", "report_list", "test_list", "project_list", "todo_list", "message", "online_list", "zoom_list", "calendar", "schedule"]
+store_paths = ["material", "plan_form", "attendance", "eval", "discuss", "qna", "file_list", "course_ing_list"]
+off_paths = ["guide", "survey", "share", "ocw", "introduce", "myinfo", "clicker", "menual", "career", "site_link", "sent_list", "popup", "/pf/"]
+# 경로로 못 정하면 메뉴 이름을 본다. 이름은 외부에서 온 글자라 규칙에 넣기만 한다.
+notify_words = ["공지", "알림", "쪽지", "과제", "시험", "퀴즈", "휴강", "보강", "학사일정"]
+store_words = ["자료", "게시판", "계획서", "출석", "성적", "토론", "질의"]
+off_words = ["FAQ", "설문", "소모임", "소개", "안내", "도움말", "투표", "매뉴얼"]
+
 # 메일 (Gmail). 유형 규칙은 대화로 등록하고 DB에 저장된다.
 # 학교 도메인처럼 개인을 알아볼 수 있는 보호 도메인은 private/local.toml의 [mail] protected_domains에 둔다.
 [mail]
