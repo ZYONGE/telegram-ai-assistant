@@ -92,6 +92,23 @@ class GoogleSettings:
     scopes: tuple[str, ...] = ()
 
 
+# 이 낱말이 공지에 있으면 즉시 알린다. 수업이 사라지거나 옮겨지는 일들이다
+# (판정은 app/collectors/eclass/urgent.py).
+DEFAULT_URGENT_WORDS = (
+    "휴강",
+    "보강",
+    "결강",
+    "강의실 변경",
+    "장소 변경",
+    "시간 변경",
+    "일정 변경",
+    "시험 변경",
+    "연기",
+    "취소",
+    "긴급",
+)
+
+
 class Level(StrEnum):
     """eClass 화면 하나를 어떻게 다룰지 (app/collectors/eclass/scope.py)."""
 
@@ -138,6 +155,8 @@ class EclassSettings:
     scope_file: Path = PRIVATE_DIR / "eclass_scope.json"
     # 어떤 화면을 어떻게 다룰지 정하는 규칙
     scope: ScopePolicy = ScopePolicy()
+    # 이 낱말이 공지에 있으면 즉시 알린다 (app/collectors/eclass/urgent.py)
+    urgent_words: tuple[str, ...] = DEFAULT_URGENT_WORDS
 
     @property
     def enabled(self) -> bool:
@@ -322,6 +341,7 @@ def load_settings(
                 catalog_file=path(eclass.get("catalog_file", str(PRIVATE_DIR / "eclass_catalog.json"))),
                 scope_file=path(eclass.get("scope_file", str(PRIVATE_DIR / "eclass_scope.json"))),
                 scope=_scope(eclass.get("scope", {})),
+                urgent_words=tuple(str(word) for word in eclass.get("urgent_words", DEFAULT_URGENT_WORDS)),
             ),
             mail=MailSettings(
                 poll_minutes=int(mail.get("poll_minutes", 10)),

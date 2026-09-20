@@ -164,7 +164,11 @@ async def create_runtime(settings: Settings, bot: Bot, llm: LLM | None = None) -
     if settings.eclass.enabled:
         # 탐색기가 만든 화면 목록을 보고 무엇을 가져올지 정한다. 새 화면이 생겼을 때만 다시 정한다.
         scope = await ensure_scope(settings.eclass.catalog_file, settings.eclass.scope, eclass_scope, light)
-        eclass_collector.set_sources(build_sources(settings.eclass.catalog_file, scope, eclass_items))
+        eclass_collector.set_sources(
+            build_sources(
+                settings.eclass.catalog_file, scope, eclass_items, settings.eclass.urgent_words
+            )
+        )
     mail_collector = MailCollector(
         google,
         mail_rules,

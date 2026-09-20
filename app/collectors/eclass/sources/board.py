@@ -18,6 +18,7 @@ from typing import Any
 from app.collectors.eclass.parse import CourseRow, ListRow, parse_body, parse_list
 from app.collectors.eclass.session import EclassError
 from app.collectors.eclass.sources.base import SourceResult
+from app.collectors.eclass.urgent import DEFAULT_URGENT_WORDS, is_urgent
 from app.core.clock import utc_now
 from app.core.config import Level
 from app.core.events import Event, EventKind, EventSource
@@ -46,6 +47,8 @@ class BoardSource:
     items: EclassRepository | None = None
     max_bodies: int = MAX_BODIES
     clock: Callable[[], datetime] = utc_now
+    # 휴강·시험 변경처럼 지금 알려야 하는 글을 가리는 낱말
+    urgent_words: tuple[str, ...] = DEFAULT_URGENT_WORDS
 
     async def fetch(self, session: Any, courses: list[CourseRow]) -> SourceResult:
         budget = [self.max_bodies]
@@ -118,8 +121,7 @@ class BoardSource:
             kind=EventKind.NOTICE,
             title=f"{self.label}: {title}",
             body=body[:BODY_PREVIEW] + ("…" if len(body) > BODY_PREVIEW else ""),
-            # 휴강·시험 변경 같은 급한 소식 판정은 T-11에서 붙인다
-            urgent=False,
+            urgent=is_urgent(item.title, item.body, self.urgent_words),
             ref_id=item.item_id,
             meta={"course": item.course, "source": self.key},
         )

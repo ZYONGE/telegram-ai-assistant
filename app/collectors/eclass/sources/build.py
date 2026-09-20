@@ -14,6 +14,7 @@ from app.collectors.eclass.sources.base import EclassSource
 from app.collectors.eclass.sources.board import BoardSource
 from app.collectors.eclass.sources.syllabus import SyllabusSource
 from app.collectors.eclass.sources.todo import TodoSource
+from app.collectors.eclass.urgent import DEFAULT_URGENT_WORDS
 from app.core.config import Level
 from app.storage.eclass import EclassRepository
 
@@ -69,6 +70,7 @@ def build_sources(
     catalog_path: Path,
     scope: dict[str, ScopeEntry],
     items: EclassRepository | None = None,
+    urgent_words: tuple[str, ...] = DEFAULT_URGENT_WORDS,
 ) -> list[EclassSource]:
     """켤 소스 목록. 할 일 화면은 언제나 첫 소스다."""
     sources: list[EclassSource] = [TodoSource()]
@@ -87,13 +89,22 @@ def build_sources(
         if TODO_MARK in path:
             continue
         special = next((cls for mark, cls in SPECIAL.items() if mark in path), None)
-        sources.append(special(path=path, level=entry.level) if special else _board(screen, entry, items))
+        sources.append(
+            special(path=path, level=entry.level)
+            if special
+            else _board(screen, entry, items, urgent_words)
+        )
 
     logger.info("eClass 소스 %d개 (할 일 포함)", len(sources))
     return sources
 
 
-def _board(screen: Screen, entry: ScopeEntry, items: EclassRepository | None) -> BoardSource:
+def _board(
+    screen: Screen,
+    entry: ScopeEntry,
+    items: EclassRepository | None,
+    urgent_words: tuple[str, ...] = DEFAULT_URGENT_WORDS,
+) -> BoardSource:
     key = source_key(screen.path)
     return BoardSource(
         key=key,
@@ -105,4 +116,5 @@ def _board(screen: Screen, entry: ScopeEntry, items: EclassRepository | None) ->
         interval=INTERVALS[entry.level],
         priority=PRIORITY[entry.level],
         items=items,
+        urgent_words=urgent_words,
     )

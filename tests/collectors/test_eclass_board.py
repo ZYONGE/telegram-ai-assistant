@@ -230,11 +230,12 @@ async def test_a_body_that_will_not_load_is_left_empty(db):
 async def test_a_new_notice_is_told_about(db):
     session = FakeSession({"/ilos/st/course/notice_list.acl": NOTICE_HTML})
     board = source(per_course=True)
-    item = (await board.fetch(session, COURSES[:1])).items[0]
+    item = (await board.fetch(session, COURSES[:1])).items[1]
 
     event = board.event_for(item, ItemChange.NEW, NOW)
     assert event.kind == EventKind.NOTICE
-    assert event.title == "공지사항: [자료구조] 9월 23일 수업 휴강"
+    assert event.title == "공지사항: [자료구조] 시험에 관하여"
+    # 보통 공지는 다음 브리핑에 묶인다
     assert event.urgent is False and event.ref_id == item.item_id
 
 
@@ -360,3 +361,23 @@ def test_a_date_without_a_year_that_is_far_ahead_is_last_year():
     """9월에 12월 날짜가 보이면 지난해 글이다."""
     html = MESSAGE_HTML.replace("09.17 오후 1:52", "12.20 오후 1:52")
     assert parse_list(html, NOW).rows[0].posted_at == kst(12, 20, 13, 52).replace(year=2025)
+
+
+async def test_a_class_that_disappears_is_told_about_right_away(db):
+    """휴강은 다음 브리핑까지 기다릴 일이 아니다 (CLAUDE.md 6절)."""
+    urgent_html = NOTICE_HTML.replace("9월 23일 수업 휴강", "9월 23일 수업 휴강 안내")
+    session = FakeSession({"/ilos/st/course/notice_list.acl": urgent_html})
+    board = source()
+    items = (await board.fetch(session, [])).items
+
+    events = [board.event_for(item, ItemChange.NEW, NOW) for item in items]
+    assert events[0].urgent is True
+    # 나머지 공지는 그대로 브리핑으로 간다
+    assert events[1].urgent is False
+
+
+async def test_the_urgent_words_come_from_the_settings(db):
+    session = FakeSession({"/ilos/st/course/notice_list.acl": NOTICE_HTML})
+    board = source(urgent_words=("시험에",))
+    item = (await board.fetch(session, [])).items[1]
+    assert board.event_for(item, ItemChange.NEW, NOW).urgent is True
