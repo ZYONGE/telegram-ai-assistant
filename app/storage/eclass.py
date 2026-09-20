@@ -16,6 +16,10 @@ from app.storage.db import Database, from_db_time, to_db_time
 
 # 로그인 실패가 이만큼 이어지면 자동화를 멈춘다
 MAX_LOGIN_FAILURES = 2
+# 한 번에 돌려주는 검색 결과 수
+SEARCH_LIMIT = 10
+# 낱말을 너무 많이 넣으면 아무것도 안 걸린다
+MAX_WORDS = 5
 
 # 주기 판정의 여유. 예약이 몇 초 밀렸다고 다음 주기까지 통째로 건너뛰지 않게 한다.
 DUE_TOLERANCE = timedelta(minutes=1)
@@ -35,6 +39,12 @@ class EclassItem:
     course: str = ""
     due_at: datetime | None = None
     url: str = ""
+    # 글 본문. 외부에서 온 글이라 저장만 하고 지시로 다루지 않는다 (절대 규칙 8).
+    body: str = ""
+    # 글이 올라온 시각. 마감(due_at)과 다르다.
+    posted_at: datetime | None = None
+    # 어느 화면에서 왔는지 (수집 소스 이름)
+    source: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +57,9 @@ class StoredItem:
     url: str
     first_seen_at: datetime
     updated_at: datetime
+    body: str = ""
+    posted_at: datetime | None = None
+    source: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,10 +88,23 @@ class EclassRepository:
         if previous is None:
             await self._conn.execute(
                 """
-                INSERT INTO eclass_items (item_id, kind, course, title, due_at, url, first_seen_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO eclass_items
+                    (item_id, kind, course, title, due_at, url, body, posted_at, source, first_seen_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (item.item_id, item.kind, item.course, item.title, to_db_time(item.due_at), item.url, stamp, stamp),
+                (
+                    item.item_id,
+                    item.kind,
+                    item.course,
+                    item.title,
+                    to_db_time(item.due_at),
+                    item.url,
+                    item.body,
+                    to_db_time(item.posted_at),
+                    item.source,
+                    stamp,
+                    stamp,
+                ),
             )
             await self._conn.commit()
             return ItemChange.NEW
@@ -86,10 +112,23 @@ class EclassRepository:
         changed = previous.due_at != item.due_at
         await self._conn.execute(
             """
-            UPDATE eclass_items SET kind = ?, course = ?, title = ?, due_at = ?, url = ?, updated_at = ?
+            UPDATE eclass_items SET kind = ?, course = ?, title = ?, due_at = ?, url = ?,
+                body = ?, posted_at = ?, source = ?, updated_at = ?
             WHERE item_id = ?
             """,
-            (item.kind, item.course, item.title, to_db_time(item.due_at), item.url, stamp, item.item_id),
+            (
+                item.kind,
+                item.course,
+                item.title,
+                to_db_time(item.due_at),
+                item.url,
+                # 본문을 늦게 읽어 온 경우에만 채운다. 이미 있는 본문을 빈 값으로 지우지 않는다.
+                item.body or previous.body,
+                to_db_time(item.posted_at or previous.posted_at),
+                item.source or previous.source,
+                stamp,
+                item.item_id,
+            ),
         )
         await self._conn.commit()
         return ItemChange.DUE_CHANGED if changed else ItemChange.SAME
@@ -106,6 +145,54 @@ class EclassRepository:
         ) as cursor:
             rows = await cursor.fetchall()
         return [_item(row) for row in rows]
+
+    async def search(
+        self,
+        query: str = "",
+        course: str = "",
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int = SEARCH_LIMIT,
+    ) -> list[StoredItem]:
+        """제목·본문·과목에서 낱말을 **모두** 포함하는 글을 최근 순으로 찾는다.
+
+        기간은 글이 올라온 시각을 먼저 보고, 없으면 처음 본 시각으로 대신한다
+        (올라온 시각을 못 읽는 화면이 있다).
+        """
+        where = []
+        params: list = []
+        for word in [word for word in query.split() if word][:MAX_WORDS]:
+            where.append("lower(title || ' ' || body || ' ' || course) LIKE ?")
+            params.append(f"%{word.lower()}%")
+        if course:
+            where.append("lower(course) LIKE ?")
+            params.append(f"%{course.lower().strip()}%")
+        if since is not None:
+            where.append("COALESCE(posted_at, first_seen_at) >= ?")
+            params.append(to_db_time(since))
+        if until is not None:
+            where.append("COALESCE(posted_at, first_seen_at) < ?")
+            params.append(to_db_time(until))
+
+        clause = f"WHERE {' AND '.join(where)}" if where else ""
+        params.append(limit)
+        async with self._conn.execute(
+            f"""
+            SELECT * FROM eclass_items {clause}
+            ORDER BY COALESCE(posted_at, first_seen_at) DESC, item_id DESC LIMIT ?
+            """,
+            tuple(params),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return [_item(row) for row in rows]
+
+    async def courses(self) -> list[str]:
+        """기억하고 있는 과목 이름. 사용자가 말한 과목을 찾아 줄 때 쓴다."""
+        async with self._conn.execute(
+            "SELECT DISTINCT course FROM eclass_items WHERE course <> '' ORDER BY course"
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return [row["course"] for row in rows]
 
     async def count(self) -> int:
         async with self._conn.execute("SELECT COUNT(*) FROM eclass_items") as cursor:
@@ -171,6 +258,9 @@ def _item(row: aiosqlite.Row) -> StoredItem:
         url=row["url"] or "",
         first_seen_at=from_db_time(row["first_seen_at"]),
         updated_at=from_db_time(row["updated_at"]),
+        body=row["body"] or "",
+        posted_at=from_db_time(row["posted_at"]),
+        source=row["source"] or "",
     )
 
 

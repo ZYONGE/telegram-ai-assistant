@@ -131,7 +131,7 @@ async def create_runtime(settings: Settings, bot: Bot, llm: LLM | None = None) -
         *archive_tools(archive, http, light),
         *(calendar_tools(google) if google.ready else not_connected_tools()),
         *(mail_tools(google, mail_rules, mail) if google.ready else not_connected_mail_tools()),
-        *(eclass_tools(eclass_scope) if settings.eclass.enabled else ()),
+        *(eclass_tools(eclass_scope, EclassRepository(db)) if settings.eclass.enabled else ()),
     )
 
     if settings.eclass.enabled:

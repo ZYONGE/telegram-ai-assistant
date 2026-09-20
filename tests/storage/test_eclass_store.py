@@ -174,3 +174,93 @@ async def test_a_failed_run_keeps_the_last_success(source_state):
 async def test_sources_are_counted_separately(source_state):
     await source_state.record_run("todo", NOW, ok=True)
     assert await source_state.due("notice", timedelta(hours=24), NOW) is True
+
+
+# --- 본문과 검색 ---
+
+
+@pytest.fixture
+def items(db):
+    return EclassRepository(db)
+
+
+async def store_item(items, item_id: str, **overrides) -> None:
+    fields = {
+        "kind": "공지",
+        "title": "휴강 안내",
+        "course": "자료구조",
+        "body": "10월 2일 수업은 휴강합니다.",
+        "posted_at": NOW,
+        "source": "course_notice",
+    }
+    await items.upsert(EclassItem(item_id=item_id, **(fields | overrides)), NOW)
+
+
+async def test_the_body_and_posting_time_are_kept(items):
+    await store_item(items, "eclass:notice:1")
+    saved = await items.get("eclass:notice:1")
+
+    assert saved.body == "10월 2일 수업은 휴강합니다."
+    assert saved.posted_at == NOW and saved.source == "course_notice"
+
+
+async def test_a_body_read_later_fills_in_the_blank(items):
+    """목록에서 제목만 먼저 보고, 나중에 본문을 읽어 오는 경우가 있다."""
+    await store_item(items, "eclass:notice:1", body="")
+    await store_item(items, "eclass:notice:1", body="본문입니다")
+    assert (await items.get("eclass:notice:1")).body == "본문입니다"
+
+
+async def test_an_empty_body_does_not_erase_what_we_had(items):
+    await store_item(items, "eclass:notice:1", body="본문입니다")
+    await store_item(items, "eclass:notice:1", body="")
+    assert (await items.get("eclass:notice:1")).body == "본문입니다"
+
+
+async def test_words_are_found_in_the_title_and_the_body(items):
+    await store_item(items, "eclass:notice:1", title="휴강 안내", body="10월 2일 수업은 쉽니다")
+    await store_item(items, "eclass:notice:2", title="과제 공지", body="보고서를 내 주세요")
+
+    assert [item.item_id for item in await items.search("휴강")] == ["eclass:notice:1"]
+    assert [item.item_id for item in await items.search("보고서")] == ["eclass:notice:2"]
+
+
+async def test_every_word_has_to_match(items):
+    await store_item(items, "eclass:notice:1", title="휴강 안내", body="10월 2일")
+    assert await items.search("휴강 보강") == []
+    assert len(await items.search("휴강 안내")) == 1
+
+
+async def test_a_course_can_be_named_in_part(items):
+    await store_item(items, "eclass:notice:1", course="자료구조")
+    await store_item(items, "eclass:notice:2", course="운영체제")
+
+    found = await items.search(course="자료")
+    assert [item.item_id for item in found] == ["eclass:notice:1"]
+
+
+async def test_a_period_is_measured_from_when_it_was_posted(items):
+    await store_item(items, "eclass:notice:old", posted_at=kst(9, 1, 9))
+    await store_item(items, "eclass:notice:new", posted_at=kst(9, 19, 9))
+
+    found = await items.search(since=kst(9, 10, 0))
+    assert [item.item_id for item in found] == ["eclass:notice:new"]
+
+
+async def test_an_item_without_a_posting_time_falls_back_to_when_we_saw_it(items):
+    """올라온 시각을 못 읽는 화면이 있다. 그때는 처음 본 시각으로 줄을 세운다."""
+    await store_item(items, "eclass:notice:1", posted_at=None)
+    assert len(await items.search(since=NOW - timedelta(hours=1))) == 1
+
+
+async def test_the_newest_comes_first(items):
+    await store_item(items, "eclass:notice:old", posted_at=kst(9, 1, 9))
+    await store_item(items, "eclass:notice:new", posted_at=kst(9, 19, 9))
+    assert [item.item_id for item in await items.search()][0] == "eclass:notice:new"
+
+
+async def test_the_courses_we_remember_can_be_listed(items):
+    await store_item(items, "eclass:notice:1", course="자료구조")
+    await store_item(items, "eclass:notice:2", course="운영체제")
+    await store_item(items, "eclass:notice:3", course="")
+    assert await items.courses() == ["운영체제", "자료구조"]

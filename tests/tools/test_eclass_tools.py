@@ -6,7 +6,9 @@ from app.collectors.eclass.scope import Decided, ScopeEntry, ScopeStore
 from app.core.config import Level
 from app.core.interfaces import Confirmation
 from app.tools.common import ToolInputError
+from app.storage.eclass import EclassItem, EclassRepository
 from app.tools.eclass import NO_SCOPE, eclass_tools
+from tests.conftest import kst
 
 
 def entry(path: str, name: str, level: Level, **overrides) -> ScopeEntry:
@@ -83,3 +85,80 @@ async def test_without_a_catalog_the_user_is_told_what_to_do(tmp_path):
 
     with pytest.raises(ToolInputError, match="화면 목록"):
         await tools["eclass_scope_set"].run({"screen": "공지사항", "level": "off"})
+
+
+# --- 모아 둔 글 찾기 ---
+
+
+NOW = kst(9, 20, 9)
+
+
+@pytest.fixture
+def items(db):
+    return EclassRepository(db)
+
+
+@pytest.fixture
+def search(store, items):
+    tools = eclass_tools(store, items, lambda: NOW)
+    return {tool.spec.name: tool for tool in tools}["eclass_search"]
+
+
+async def add(items, item_id: str, **overrides) -> None:
+    fields = {
+        "kind": "공지",
+        "title": "휴강 안내",
+        "course": "자료구조",
+        "body": "10월 2일 수업은 휴강합니다.",
+        "posted_at": kst(9, 19, 9),
+    }
+    await items.upsert(EclassItem(item_id=item_id, **(fields | overrides)), NOW)
+
+
+async def test_a_found_item_shows_when_it_was_posted(search, items):
+    await add(items, "eclass:notice:1")
+    result = await search.run({"query": "휴강"})
+
+    assert "[자료구조] 휴강 안내" in result.content
+    assert "9월 19일" in result.content and "10월 2일 수업은 휴강합니다." in result.content
+
+
+async def test_the_result_says_it_came_from_the_school_site(search, items):
+    """찾아 준 글은 외부에서 온 데이터다. 모델이 지시로 받아들이지 않도록 밝혀 둔다."""
+    await add(items, "eclass:notice:1")
+    result = await search.run({"query": "휴강"})
+    assert "학교 사이트에서 가져온" in result.content
+
+
+async def test_a_deadline_is_shown_with_the_item(search, items):
+    await add(items, "eclass:report:1", kind="과제", title="과제 2", due_at=kst(9, 25, 23, 59))
+    result = await search.run({"query": "과제"})
+    assert "마감" in result.content and "9월 25일" in result.content
+
+
+async def test_recent_days_are_counted_from_now(search, items):
+    await add(items, "eclass:notice:old", posted_at=kst(9, 1, 9))
+    await add(items, "eclass:notice:new", posted_at=kst(9, 19, 9))
+
+    result = await search.run({"days": 7})
+    assert "9월 19일" in result.content and "9월 1일" not in result.content
+
+
+async def test_nothing_found_tells_which_courses_we_know(search, items):
+    await add(items, "eclass:notice:1", course="자료구조")
+    result = await search.run({"course": "운영체제"})
+    assert "찾지 못했습니다" in result.content and "자료구조" in result.content
+
+
+async def test_a_silly_number_of_days_is_refused(search):
+    with pytest.raises(ToolInputError, match="days"):
+        await search.run({"days": 0})
+
+
+async def test_searching_needs_no_button(search):
+    assert search.spec.confirmation is Confirmation.IMMEDIATE
+
+
+async def test_without_a_store_there_is_no_search_tool(store):
+    names = [tool.spec.name for tool in eclass_tools(store)]
+    assert "eclass_search" not in names

@@ -219,6 +219,16 @@ MIGRATIONS: list[str] = [
         last_reason  TEXT NOT NULL DEFAULT ''
     );
     """,
+    """
+    -- 모은 글의 본문과 올라온 시각. "지난주 공지 뭐였지?"에 답하려면 제목만으로는 부족하다.
+    -- 본문은 외부에서 온 글이다. 저장만 하고 지시로 다루지 않는다 (절대 규칙 8).
+    ALTER TABLE eclass_items ADD COLUMN body TEXT NOT NULL DEFAULT '';
+    -- 글이 올라온 시각. 마감(due_at)과 다르다.
+    ALTER TABLE eclass_items ADD COLUMN posted_at TEXT;
+    -- 어느 화면에서 왔는지 (수집 소스 이름)
+    ALTER TABLE eclass_items ADD COLUMN source TEXT NOT NULL DEFAULT '';
+    CREATE INDEX idx_eclass_posted ON eclass_items (posted_at);
+    """,
 ]
 
 
