@@ -23,6 +23,7 @@ from app.agent.prompt import PromptBuilder, load_identity
 from app.channels.telegram import TelegramNotifier
 from app.collectors.eclass.collector import EclassCollector
 from app.collectors.eclass.scope import ScopeStore, ensure_scope
+from app.collectors.eclass.sources import build_sources
 from app.collectors.mail import MailCollector
 from app.collectors.weather import KmaWeather
 from app.channels.telegram_bot import SERVICES_KEY, ChatHandlers, ChatServices
@@ -120,6 +121,7 @@ async def create_runtime(settings: Settings, bot: Bot, llm: LLM | None = None) -
 
     registry = ToolRegistry(PendingActionStore(db))
     eclass_scope = ScopeStore(settings.eclass.scope_file)
+    eclass_items = EclassRepository(db)
     memory = MarkdownMemoryStore(settings.storage.memory_path)
     archive = ArchiveRepository(db)
     registry.register(
@@ -131,12 +133,8 @@ async def create_runtime(settings: Settings, bot: Bot, llm: LLM | None = None) -
         *archive_tools(archive, http, light),
         *(calendar_tools(google) if google.ready else not_connected_tools()),
         *(mail_tools(google, mail_rules, mail) if google.ready else not_connected_mail_tools()),
-        *(eclass_tools(eclass_scope, EclassRepository(db)) if settings.eclass.enabled else ()),
+        *(eclass_tools(eclass_scope, eclass_items) if settings.eclass.enabled else ()),
     )
-
-    if settings.eclass.enabled:
-        # 탐색기가 만든 화면 목록을 보고 무엇을 가져올지 정한다. 새 화면이 생겼을 때만 다시 정한다.
-        await ensure_scope(settings.eclass.catalog_file, settings.eclass.scope, eclass_scope, light)
 
     prompt = PromptBuilder(
         settings.storage.system_prompt_path,
@@ -161,8 +159,12 @@ async def create_runtime(settings: Settings, bot: Bot, llm: LLM | None = None) -
         honorific,
     )
     eclass_collector = EclassCollector(
-        settings.eclass, EclassRepository(db), EclassHealthStore(db), EclassSourceStateStore(db)
+        settings.eclass, eclass_items, EclassHealthStore(db), EclassSourceStateStore(db)
     )
+    if settings.eclass.enabled:
+        # 탐색기가 만든 화면 목록을 보고 무엇을 가져올지 정한다. 새 화면이 생겼을 때만 다시 정한다.
+        scope = await ensure_scope(settings.eclass.catalog_file, settings.eclass.scope, eclass_scope, light)
+        eclass_collector.set_sources(build_sources(settings.eclass.catalog_file, scope, eclass_items))
     mail_collector = MailCollector(
         google,
         mail_rules,

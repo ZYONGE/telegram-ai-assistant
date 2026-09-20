@@ -28,7 +28,14 @@ from urllib.parse import parse_qs, urlsplit
 from bs4 import BeautifulSoup
 
 from app.collectors.eclass.parse import parse_course_select
-from app.collectors.eclass.session import COURSE_LIST_PATH, MAIN_PATH, TODO_PATH, EclassError, EclassSession
+from app.collectors.eclass.session import (
+    COURSE_LIST_PATH,
+    COURSE_ROOM_PATH,
+    MAIN_PATH,
+    TODO_PATH,
+    EclassError,
+    EclassSession,
+)
 from app.core.clock import KST
 from app.core.config import PRIVATE_DIR, load_settings
 
@@ -60,9 +67,6 @@ SCREEN_SUFFIX = ".acl"
 # 거기에는 읽기만 하는 주소와 무언가를 바꾸는 주소가 섞여 있다.
 READING_TAILS = ("_form.acl", "_list.acl", "_view.acl")
 
-# 과목방은 열쇠(KJKEY)를 넘겨 문을 연 뒤에야 방 화면이 나온다 (2026-09-20 실제 확인)
-COURSE_ENTER_PATH = "/ilos/st/course/eclass_room2.acl"
-COURSE_ROOM_PATH = "/ilos/st/course/submain_form.acl"
 # 과목방 안에서만 뜻이 있는 화면. 방 밖에서 열면 빈 껍데기가 온다.
 COURSE_PREFIX = "/ilos/st/course/"
 # 메뉴 구조는 과목마다 같다. 다만 비어 있는 과목이 있어 둘까지 본다.
@@ -240,14 +244,6 @@ async def course_keys(session) -> list[str]:
     return [row.kjkey for row in parse_course_select(html).rows]
 
 
-async def enter_course(session, key: str) -> None:
-    """과목방 문을 연다. 열쇠를 넘겨 그 과목을 현재 방으로 삼을 뿐, 아무것도 바꾸지 않는다."""
-    await session.post(
-        COURSE_ENTER_PATH,
-        {"KJKEY": key, "returnData": "json", "returnURI": COURSE_ROOM_PATH, "encoding": "utf-8"},
-    )
-
-
 async def explore(
     session,
     sample_dir: Path,
@@ -279,7 +275,7 @@ async def explore(
 
     for key in list(courses)[:max_courses]:
         try:
-            await enter_course(session, key)
+            await session.enter_course(key)
         except EclassError as exc:
             logger.warning("과목방에 들어가지 못했습니다 (%s)", exc.reason)
             screens.append(

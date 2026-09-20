@@ -22,6 +22,9 @@ MAIN_PATH = "/ilos/main/main_form.acl"
 # 할 일 목록은 메인 화면이 AJAX로 부르는 주소다 (2026-09-20 실제 확인)
 TODO_PATH = "/ilos/mp/todo_list_form.acl"
 COURSE_LIST_PATH = "/ilos/st/main/course_ing_list_form.acl"
+# 과목방은 열쇠(KJKEY)를 넘겨 문을 연 뒤에야 안이 보인다 (docs/refs/eclass-paths.md)
+COURSE_ENTER_PATH = "/ilos/st/course/eclass_room2.acl"
+COURSE_ROOM_PATH = "/ilos/st/course/submain_form.acl"
 NOTICE_PATH = "/ilos/community/notice_list_form.acl"
 ACADEMIC_CALENDAR_PATH = "/ilos/st/schedule/academic_calendar_list_form.acl"
 
@@ -174,6 +177,14 @@ class EclassSession:
             return await self._page.content()
         except Exception as exc:
             raise EclassError(Failure.NETWORK, MESSAGES[Failure.NETWORK]) from _hide(exc)
+
+    async def enter_course(self, key: str) -> None:
+        """과목방 문을 연다. 그 과목을 현재 방으로 삼을 뿐 아무것도 바꾸지 않는다 (절대 규칙 5)."""
+        await self.post(
+            COURSE_ENTER_PATH,
+            {"KJKEY": key, "returnData": "json", "returnURI": COURSE_ROOM_PATH, "encoding": "utf-8"},
+        )
+        await self.open(COURSE_ROOM_PATH)
 
     async def post(self, path: str, data: dict[str, str]) -> str:
         """할 일 목록처럼 AJAX로 받아야 하는 화면.

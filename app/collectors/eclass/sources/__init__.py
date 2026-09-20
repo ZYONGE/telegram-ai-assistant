@@ -5,14 +5,23 @@
 """
 
 from app.collectors.eclass.sources.base import EclassSource, SourceResult
+from app.collectors.eclass.sources.board import BoardSource
+from app.collectors.eclass.sources.build import build_sources
 from app.collectors.eclass.sources.todo import TodoSource
 
-__all__ = ["EclassSource", "SourceResult", "TodoSource", "default_sources"]
+__all__ = [
+    "BoardSource",
+    "EclassSource",
+    "SourceResult",
+    "TodoSource",
+    "build_sources",
+    "default_sources",
+]
 
 
 def default_sources() -> list[EclassSource]:
     """켜 둘 소스. 위에서부터 순서대로 돈다.
 
-    공지·쪽지·학사일정·강의계획서는 실제 화면을 확인한 뒤 붙인다 (docs/tasks.md T-09·T-10).
+    공지·쪽지·게시판은 탐색 결과에서 만들어진다 (`build_sources`). 여기는 그것이 없을 때의 기본값이다.
     """
     return [TodoSource()]

@@ -62,6 +62,7 @@ class FakeSession:
         self.broken = broken or set()
         self.opened: list[str] = []
         self.posted: list[str] = []
+        self.entered: list[str] = []
 
     async def open(self, target: str) -> str:
         self.opened.append(target)
@@ -70,6 +71,9 @@ class FakeSession:
     async def post(self, target: str, data: dict) -> str:
         self.posted.append(target)
         return self._page(target)
+
+    async def enter_course(self, key: str) -> None:
+        self.entered.append(key)
 
     def _page(self, target: str) -> str:
         path = urlsplit(target).path

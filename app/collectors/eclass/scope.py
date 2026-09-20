@@ -56,6 +56,8 @@ class Screen:
     has_date: bool = False
     has_due: bool = False
     per_course: bool = False
+    # 껍데기가 따로 불러오는 내용 주소. 빈 값이면 화면을 열면 내용까지 온다.
+    data_path: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,6 +220,7 @@ def load_catalog(path: Path) -> list[Screen]:
                 has_date=bool(row.get("has_date")),
                 has_due=bool(row.get("has_due")),
                 per_course=bool(row.get("per_course")),
+                data_path=str(row.get("data_path", "")),
             )
         )
     return [screen for screen in screens if screen.path]

@@ -10,10 +10,10 @@
 import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
-from app.collectors.eclass.parse import CourseRow
-from app.collectors.eclass.session import EclassError, EclassSession, Failure
+from app.collectors.eclass.parse import CourseRow, parse_course_select
+from app.collectors.eclass.session import TODO_PATH, EclassError, EclassSession, Failure
 from app.collectors.eclass.sources import EclassSource, SourceResult, default_sources
 from app.core.clock import format_kst, utc_now
 from app.core.config import EclassSettings
@@ -25,6 +25,15 @@ logger = logging.getLogger(__name__)
 LAYOUT_MESSAGE = "eClass 화면 구조가 바뀐 것 같습니다. 내용을 읽지 못했습니다."
 STALE_MESSAGE = "eClass 확인이 계속 안 되고 있습니다."
 BLOCKED_MESSAGE = "로그인이 연속으로 실패해 eClass 자동 확인을 멈췄습니다. 계정을 확인한 뒤 다시 켜 주세요."
+# 한 번에 돌릴 소스 수. 남은 소스는 다음 차례에 먼저 돈다.
+MAX_SOURCES_PER_RUN = 8
+# 그중 과목방 화면은 이만큼만. 과목마다 문을 열고 들어가야 해서 한 소스가 수십 번 요청한다.
+MAX_COURSE_SOURCES_PER_RUN = 2
+# 화면을 처음 볼 때는 거기 쌓여 있던 지난 글까지 전부 새 글이다.
+# 이만큼 안에 올라온 글만 알리고 나머지는 조용히 담는다.
+FIRST_RUN_WINDOW = timedelta(days=7)
+# 한 번도 돌지 않은 소스는 가장 오래 기다린 것으로 본다
+NEVER = datetime(1970, 1, 1, tzinfo=UTC)
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +66,10 @@ class EclassCollector:
         self._session_factory = session_factory
         self._sources = list(sources) if sources is not None else default_sources()
 
+    def set_sources(self, sources: Sequence[EclassSource]) -> None:
+        """탐색 결과로 만든 소스로 바꾼다. 비서를 켤 때 한 번 부른다."""
+        self._sources = list(sources)
+
     async def collect(self) -> list[Event]:
         if not self._settings.enabled:
             return []
@@ -67,7 +80,7 @@ class EclassCollector:
             logger.info("eClass 로그인 실패가 이어져 수집을 건너뜁니다")
             return []
 
-        due = [source for source in self._sources if await self._state.due(source.key, source.interval, now)]
+        due = await self._due(now)
         if not due:
             logger.debug("eClass: 주기가 된 소스가 없습니다")
             return []
@@ -80,20 +93,58 @@ class EclassCollector:
 
         return await self._events(harvest, now)
 
+    async def _due(self, now: datetime) -> list[EclassSource]:
+        """이번에 돌릴 소스. **오래 기다린 것부터** 보고, 같은 때면 알릴 화면을 앞에 둔다.
+
+        기다린 순으로 보지 않으면 늘 같은 화면만 돌고 나머지는 영영 밀린다
+        (알릴 화면은 주기가 0이라 언제나 차례가 돌아온다).
+        """
+        waiting: list[tuple[int, datetime, EclassSource]] = []
+        for source in self._sources:
+            if not await self._state.due(source.key, source.interval, now):
+                continue
+            state = await self._state.read(source.key)
+            last_run = state.last_run_at if state is not None else NEVER
+            waiting.append((getattr(source, "priority", 1), last_run, source))
+        waiting.sort(key=lambda row: (row[1], row[0]))
+
+        picked: list[EclassSource] = []
+        rooms = 0
+        for _priority, _last_run, source in waiting:
+            if len(picked) >= MAX_SOURCES_PER_RUN:
+                break
+            if getattr(source, "per_course", False):
+                if rooms >= MAX_COURSE_SOURCES_PER_RUN:
+                    continue
+                rooms += 1
+            picked.append(source)
+        return picked
+
     async def _run(self, sources: list[EclassSource]) -> list[Harvest]:
         """세션 하나로 소스를 차례로 돌린다. 소스의 실패는 그 소스에만 남긴다."""
         session = self._session_factory(self._settings)
         await session.start()
         try:
             await session.ensure_login()
-            # 과목방마다 따로 있는 화면을 위한 자리. 과목 목록 확보는 T-09에서 붙인다.
-            courses: list[CourseRow] = []
+            courses = await self._courses(session, sources)
             harvest: list[Harvest] = []
             for source in sources:
                 harvest.append(await self._run_one(source, session, courses))
             return harvest
         finally:
             await session.close()
+
+    async def _courses(self, session: object, sources: list[EclassSource]) -> list[CourseRow]:
+        """과목방 화면을 볼 소스가 있을 때만 수강 과목을 읽는다."""
+        if not any(getattr(source, "per_course", False) for source in sources):
+            return []
+        try:
+            rows = parse_course_select(await session.open(TODO_PATH)).rows
+        except EclassError as exc:
+            logger.warning("수강 과목을 읽지 못했습니다 (%s)", exc.reason)
+            return []
+        logger.info("수강 과목 %d개", len(rows))
+        return rows
 
     async def _run_one(self, source: EclassSource, session: object, courses: list[CourseRow]) -> Harvest:
         try:
@@ -106,6 +157,10 @@ class EclassCollector:
         return Harvest(source, result=result)
 
     async def _events(self, harvest: list[Harvest], now: datetime) -> list[Event]:
+        # 기록하기 전에 봐야 한다. 기록하고 나면 처음인지 알 수 없다.
+        first_run = {
+            entry.source.key for entry in harvest if await self._state.read(entry.source.key) is None
+        }
         for entry in harvest:
             await self._state.record_run(
                 entry.source.key, now, ok=entry.error is None, reason=str(entry.error.reason) if entry.error else ""
@@ -122,9 +177,12 @@ class EclassCollector:
         events: list[Event] = []
         seen = 0
         for entry in succeeded:
+            backfill = entry.source.key in first_run
             for item in entry.result.items:
                 seen += 1
                 change = await self._items.upsert(item, now)
+                if backfill and _is_old(item, now):
+                    continue  # 처음 보는 화면에 쌓여 있던 지난 글
                 event = entry.source.event_for(item, change, now)
                 if event is not None:
                     events.append(event)
@@ -152,6 +210,11 @@ class EclassCollector:
                 )
             )
         return events
+
+
+def _is_old(item, now: datetime) -> bool:
+    """올린 시각이 오래된 글인지. 시각을 모르는 것(할 일 같은 것)은 오래됐다고 보지 않는다."""
+    return item.posted_at is not None and now - item.posted_at > FIRST_RUN_WINDOW
 
 
 def _detail(entry: Harvest) -> str:

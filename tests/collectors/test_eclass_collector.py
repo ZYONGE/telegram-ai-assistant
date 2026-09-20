@@ -2,7 +2,12 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from app.collectors.eclass.collector import BLOCKED_MESSAGE, EclassCollector
+from app.collectors.eclass.collector import (
+    BLOCKED_MESSAGE,
+    MAX_COURSE_SOURCES_PER_RUN,
+    MAX_SOURCES_PER_RUN,
+    EclassCollector,
+)
 from app.collectors.eclass.session import EclassError, Failure
 from app.core.config import EclassSettings
 from app.collectors.eclass.sources import SourceResult
@@ -217,10 +222,12 @@ class FakeSource:
         items: list[EclassItem] | None = None,
         error: EclassError | None = None,
         interval: timedelta = timedelta(0),
+        per_course: bool = False,
     ) -> None:
         self.key = key
         self.label = key
         self.interval = interval
+        self.per_course = per_course
         self.calls = 0
         self._items = items or []
         self._error = error
@@ -292,3 +299,90 @@ async def test_a_failed_source_is_tried_again_next_turn(stores):
     await collector(stores, FakeSession(), sources=[flaky, working]).collect()
     await collector(stores, FakeSession(), sources=[flaky, working]).collect()
     assert flaky.calls == 2
+
+
+# --- 화면을 처음 볼 때 ---
+
+
+class DatedSource(FakeSource):
+    """올린 시각이 있는 글을 돌려주는 소스 (게시판)."""
+
+    def __init__(self, key: str, rows: list[tuple[str, datetime | None]]) -> None:
+        super().__init__(key)
+        self._rows = rows
+
+    async def fetch(self, session, courses) -> SourceResult:
+        self.calls += 1
+        return SourceResult(
+            [
+                EclassItem(item_id=f"eclass:{self.key}:{name}", kind="공지", title=name, posted_at=when)
+                for name, when in self._rows
+            ]
+        )
+
+
+async def test_old_posts_are_taken_in_quietly_the_first_time(stores):
+    """게시판을 처음 열면 지난 글이 잔뜩 있다. 그것까지 알리면 브리핑이 넘친다."""
+    board = DatedSource("notice", [("작년 글", kst(1, 5, 9)), ("어제 글", NOW - timedelta(days=1))])
+    events = await collector(stores, FakeSession(), sources=[board]).collect()
+
+    assert [event.title for event in events] == ["어제 글"]
+    # 알리지 않았을 뿐 담아 두기는 했다
+    assert await stores[0].get("eclass:notice:작년 글") is not None
+
+
+async def test_an_item_without_a_posting_time_is_still_told_about(stores):
+    """할 일에는 올린 시각이 없다. 처음 수집이라고 빠뜨리면 할 일이 등록되지 않는다."""
+    board = DatedSource("todo", [("과제", None)])
+    events = await collector(stores, FakeSession(), sources=[board]).collect()
+    assert [event.title for event in events] == ["과제"]
+
+
+async def test_from_the_second_time_old_posts_are_told_about(stores):
+    """한 번 본 화면에 뒤늦게 옛 글이 올라오면 그건 새 글이다."""
+    session = FakeSession()
+    await collector(stores, session, sources=[DatedSource("notice", [])]).collect()
+
+    board = DatedSource("notice", [("뒤늦게 올라온 옛 글", kst(1, 5, 9))])
+    events = await collector(stores, session, sources=[board]).collect()
+    assert [event.title for event in events] == ["뒤늦게 올라온 옛 글"]
+
+
+async def test_only_a_few_sources_run_at_a_time(stores):
+    sources = [FakeSource(f"board{index}") for index in range(MAX_SOURCES_PER_RUN + 4)]
+    await collector(stores, FakeSession(), sources=sources).collect()
+
+    assert sum(source.calls for source in sources) == MAX_SOURCES_PER_RUN
+
+
+async def test_few_course_screens_run_at_a_time(stores):
+    """과목방 화면은 한 소스가 과목 수만큼 요청한다. 한 번에 몰아서 돌리지 않는다."""
+    rooms = [FakeSource(f"room{index}", per_course=True) for index in range(5)]
+    await collector(stores, FakeSession(), sources=rooms).collect()
+
+    assert sum(source.calls for source in rooms) == MAX_COURSE_SOURCES_PER_RUN
+
+
+async def test_the_screens_we_notify_about_go_first(stores):
+    """한 번도 돌지 않은 소스끼리는 알릴 화면이 앞선다."""
+    quiet = [FakeSource(f"stored{index}") for index in range(MAX_SOURCES_PER_RUN)]
+    for source in quiet:
+        source.priority = 2
+    loud = FakeSource("notice")
+    loud.priority = 0
+
+    await collector(stores, FakeSession(), sources=[*quiet, loud]).collect()
+    assert loud.calls == 1
+
+
+async def test_the_source_that_waited_longest_goes_next(stores):
+    """한 번에 다 돌리지 않으므로, 늘 같은 것만 돌면 나머지는 영영 밀린다."""
+    sources = [FakeSource(f"board{index}") for index in range(MAX_SOURCES_PER_RUN + 3)]
+    first = collector(stores, FakeSession(), sources=sources)
+
+    await first.collect()
+    ran_first = {source.key for source in sources if source.calls}
+    await collector(stores, FakeSession(), sources=sources, now=NOW + timedelta(minutes=90)).collect()
+
+    ran_second = {source.key for source in sources if source.calls and source.key not in ran_first}
+    assert ran_second and not (ran_second & ran_first)

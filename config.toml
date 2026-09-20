@@ -61,9 +61,12 @@ stale_hours = 12
 # 규칙과 모델 둘 다 정하지 못한 화면을 어떻게 둘지
 unknown = "off"
 # 경로로 먼저 정한다. 사이트 구조라 메뉴 이름보다 덜 흔들린다.
-notify_paths = ["notice", "notification", "report_list", "test_list", "project_list", "todo_list", "message", "online_list", "zoom_list", "calendar", "schedule"]
-store_paths = ["material", "plan_form", "attendance", "eval", "discuss", "qna", "file_list", "course_ing_list"]
-off_paths = ["guide", "survey", "share", "ocw", "introduce", "myinfo", "clicker", "menual", "career", "site_link", "sent_list", "popup", "/pf/"]
+# 마감이 있는 것(과제·시험·온라인강의·팀프로젝트)은 할 일 화면이 한곳에서 알린다.
+# 과목방 게시판은 같은 것을 또 알리지 않도록 저장만 한다.
+notify_paths = ["notice", "notification", "todo_list", "message", "calendar", "schedule"]
+store_paths = ["material", "plan_form", "attendance", "attend_list", "eval", "discuss", "qna", "file_list", "report_list", "test_list", "project_list", "online_list", "zoom_list", "record_list"]
+# 게시판이 아닌 화면(수강 과목 목록·시간표)은 글 목록 파서로 읽으면 엉뚱한 것이 담긴다.
+off_paths = ["guide", "survey", "share", "ocw", "introduce", "myinfo", "clicker", "menual", "career", "site_link", "sent_list", "popup", "/pf/", "course_ing", "academic_timetable"]
 # 경로로 못 정하면 메뉴 이름을 본다. 이름은 외부에서 온 글자라 규칙에 넣기만 한다.
 notify_words = ["공지", "알림", "쪽지", "과제", "시험", "퀴즈", "휴강", "보강", "학사일정"]
 store_words = ["자료", "게시판", "계획서", "출석", "성적", "토론", "질의"]

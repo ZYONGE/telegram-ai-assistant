@@ -8,7 +8,7 @@
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from bs4 import BeautifulSoup
 
@@ -25,9 +25,19 @@ CATEGORIES = {
 DEFAULT_CATEGORY = "온라인 강의"
 
 _DATE = re.compile(r"(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})(?:\s*(오전|오후)?\s*(\d{1,2}):(\d{2}))?")
+# 연도 없이 "09.17 오후 1:52"로 적는 화면이 있다 (쪽지함). 연도는 기준 시각에서 채운다.
+_SHORT_DATE = re.compile(r"(\d{1,2})[.\-/](\d{1,2})(?:\s*(오전|오후)?\s*(\d{1,2}):(\d{2}))?")
 _GO_LECTURE = re.compile(r"goLecture\(\s*['\"]?([^'\",)]+)['\"]?\s*,\s*['\"]?([^'\",)]+)['\"]?\s*,\s*['\"]?([^'\",)]*)")
 _ECLASS_ROOM = re.compile(r"eclassRoom\(\s*['\"]?([^'\",)]+)")
 _ARTL_NUM = re.compile(r"ARTL_NUM=(\d+)")
+# 줄 하나를 가리키는 번호. 화면마다 이름이 다르다 (공지 ARTL_NUM, 과제 RT_SEQ, 쪽지 checkbox).
+_ROW_ID = re.compile(r"(?:ARTL_NUM|RT_SEQ|SEQ|IDX)=(\d+)", re.IGNORECASE)
+_VIEW_PAGE = re.compile(r"viewPage\(\s*['\"](\d+)")
+_IMPT_SEQ = re.compile(r'impt_seq="(\d+)"')
+# 목록 줄에서 글을 여는 주소 (본문을 읽어 올 때 쓴다)
+_LINK = re.compile(r"['\"](/ilos/[\w./-]*_view[\w./-]*\.acl\?[^'\"]*)['\"]")
+# 연도를 채울 때, 이만큼 앞선 날짜까지는 올해로 본다
+_FUTURE_SLACK = timedelta(days=30)
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +62,18 @@ class CourseRow:
     name: str
     professor: str = ""
     time: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class ListRow:
+    """게시판 한 줄. 공지·자료·게시판·쪽지가 대체로 같은 모양이다."""
+
+    article_id: str
+    title: str
+    posted_at: datetime | None = None
+    author: str = ""
+    # 글을 여는 주소. 본문을 읽어 올 때 쓴다 (목록 줄의 onclick에 들어 있다).
+    view_url: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,6 +211,98 @@ def parse_courses(html: str) -> ParseResult:
             )
         )
     return ParseResult(rows, skipped)
+
+
+def parse_short_datetime(text: str | None, now: datetime) -> datetime | None:
+    """연도 없이 적힌 날짜. 앞으로 한 달 넘게 남은 날로 읽히면 지난해 글로 본다."""
+    if not text:
+        return None
+    found = _SHORT_DATE.search(text)
+    if not found:
+        return None
+    month, day, meridiem, hour, minute = found.groups()
+    hour_value = int(hour) if hour else 0
+    if meridiem == "오후" and hour_value < 12:
+        hour_value += 12
+    elif meridiem == "오전" and hour_value == 12:
+        hour_value = 0
+    local = now.astimezone(KST)
+    for year in (local.year, local.year - 1):
+        try:
+            when = datetime(year, int(month), int(day), hour_value, int(minute or 0), tzinfo=KST)
+        except ValueError:
+            return None
+        if when - local <= _FUTURE_SLACK:
+            return when
+    return None
+
+
+def _row_id(markup: str, row) -> str:
+    """줄 하나를 가리키는 번호. 화면마다 이름이 달라 알려진 것을 차례로 본다."""
+    found = _ROW_ID.search(markup) or _VIEW_PAGE.search(markup) or _IMPT_SEQ.search(markup)
+    if found:
+        return found.group(1)
+    box = row.select_one("input[type=checkbox][value]")
+    return str(box.get("value", "")).strip() if box else ""
+
+
+def _row_title(row) -> str:
+    """제목. 아래쪽 작성자·조회수 줄은 빼고 첫 줄만 쓴다."""
+    for selector in (".subjt_top", "a div", "td.left a", "td.left", "a"):
+        node = row.select_one(selector)
+        if node is not None and (text := _text(node)):
+            return text
+    return ""
+
+
+def parse_list(html: str, now: datetime | None = None) -> ParseResult:
+    """게시판 목록 한 판. 공지·자료실·열린 게시판·쪽지가 모두 이 모양이다.
+
+    칸이 둘 이상인 줄만 센다. "조회할 자료가 없습니다"는 칸 하나를 늘려 쓰므로 저절로 빠진다.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    rows: list[ListRow] = []
+    skipped = 0
+    seen: set[str] = set()
+    for row in soup.select("tr"):
+        cells = row.select("td")
+        if len(cells) < 2:
+            continue
+        markup = str(row)
+        article_id = _row_id(markup, row)
+        title = _row_title(row)
+        if not (article_id and title) or article_id in seen:
+            skipped += 1
+            continue
+        seen.add(article_id)
+
+        posted_at = None
+        for cell in reversed(cells):
+            text = _text(cell)
+            posted_at = parse_datetime(text) or (parse_short_datetime(text, now) if now else None)
+            if posted_at is not None:
+                break
+        link = _LINK.search(markup)
+        rows.append(
+            ListRow(
+                article_id=article_id,
+                title=title,
+                posted_at=posted_at,
+                author=_text(row.select_one(".subjt_bottom span")),
+                view_url=link.group(1).replace("&amp;", "&") if link else "",
+            )
+        )
+    return ParseResult(rows, skipped)
+
+
+def parse_body(html: str) -> str:
+    """글 본문. 외부에서 온 글이므로 읽어 두기만 한다 (절대 규칙 8)."""
+    soup = BeautifulSoup(html, "html.parser")
+    for selector in (".textviewer", "#content_text"):
+        node = soup.select_one(selector)
+        if node is not None and (text := _text(node)):
+            return text
+    return ""
 
 
 def parse_notices(html: str, course: str = "") -> ParseResult:
