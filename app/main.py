@@ -47,6 +47,7 @@ from app.scheduler.gate import RuleBasedGate
 from app.scheduler.ingest import Ingestor
 from app.scheduler.tasks import TaskService
 from app.storage.archive import ArchiveRepository
+from app.storage.backup import BackupService
 from app.storage.conversation import ConversationStore, PendingActionStore
 from app.storage.eclass import EclassHealthStore, EclassRepository, EclassSourceStateStore
 from app.storage.location import LocationStore
@@ -178,8 +179,10 @@ async def create_runtime(settings: Settings, bot: Bot, llm: LLM | None = None) -
         frozenset(settings.mail.protected_domains),
     )
     ingestor = Ingestor(todos, dispatcher)
+    backup = BackupService(db, settings.storage.db_path.parent, settings.backup)
     _add_system_jobs(scheduler, settings, dispatcher, assistant, briefing)
     _add_collector_jobs(scheduler, settings, ingestor, mail_collector, google, eclass_collector)
+    _add_backup_job(scheduler, settings, ingestor, backup)
     restored = await tasks.start()
     scheduler.start()
     logger.info("예약 작업 %d건 복원, 스케줄러 시작", restored)
@@ -224,6 +227,35 @@ def _add_system_jobs(
         CronTrigger(day_of_week="sun", hour=weekly.hour, minute=weekly.minute, timezone=KST),
         id="system:briefing:weekly", coalesce=True, max_instances=1, misfire_grace_time=1800,
     )
+
+
+def _add_backup_job(
+    scheduler: AsyncIOScheduler,
+    settings: Settings,
+    ingestor: Ingestor,
+    backup: BackupService,
+) -> None:
+    """매일 밤 백업. 실패하면 조용히 넘어가지 않고 알린다."""
+    if not settings.backup.enabled:
+        logger.info("백업이 꺼져 있습니다")
+        return
+
+    async def run_backup() -> None:
+        now = utc_now()
+        events = await backup.run(now)
+        if events:
+            await ingestor.ingest(events, now)
+
+    at = settings.backup.at
+    scheduler.add_job(
+        run_backup,
+        CronTrigger(hour=at.hour, minute=at.minute, timezone=KST),
+        id="system:backup",
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=3600,
+    )
+    logger.info("백업: 매일 %02d:%02d (%d일 보관)", at.hour, at.minute, settings.backup.keep_days)
 
 
 def _add_collector_jobs(

@@ -167,6 +167,19 @@ class EclassSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class BackupSettings:
+    """야간 백업. 잃으면 되돌릴 수 없는 것만 뜬다 (app/storage/backup.py)."""
+
+    # 매일 이 시각에 뜬다. 조용한 시간이라 수집과 겹치지 않는다.
+    at: time = time(3, 30)
+    # 이 일수만큼만 보관한다. 0이면 지우지 않는다.
+    keep_days: int = 14
+    # 개인 파일이므로 private/ 안에 둔다
+    directory: Path = PRIVATE_DIR / "backups"
+    enabled: bool = True
+
+
+@dataclass(frozen=True, slots=True)
 class MailSettings:
     """메일 수집 주기와 보호 도메인. 학교 도메인처럼 개인을 알아볼 수 있는 값은 private/local.toml에 둔다."""
 
@@ -223,6 +236,7 @@ class Settings:
     llm: LLMSettings = field(default_factory=LLMSettings)
     google: GoogleSettings = GoogleSettings()
     eclass: EclassSettings = EclassSettings()
+    backup: BackupSettings = BackupSettings()
     mail: MailSettings = MailSettings()
     weather: WeatherSettings = WeatherSettings()
     conversation: ConversationSettings = ConversationSettings()
@@ -301,6 +315,7 @@ def load_settings(
         llm = data.get("llm", {})
         google = data.get("google", {})
         eclass = data.get("eclass", {})
+        backup = data.get("backup", {})
         mail = data.get("mail", {})
         weather = data.get("weather", {})
         conversation = data.get("conversation", {})
@@ -346,6 +361,12 @@ def load_settings(
                 scope=_scope(eclass.get("scope", {})),
                 urgent_words=tuple(str(word) for word in eclass.get("urgent_words", DEFAULT_URGENT_WORDS)),
                 browser_args=tuple(str(arg) for arg in eclass.get("browser_args", ())),
+            ),
+            backup=BackupSettings(
+                at=_time(backup, "at", BackupSettings().at),
+                keep_days=int(backup.get("keep_days", 14)),
+                directory=path(backup.get("directory", str(PRIVATE_DIR / "backups"))),
+                enabled=bool(backup.get("enabled", True)),
             ),
             mail=MailSettings(
                 poll_minutes=int(mail.get("poll_minutes", 10)),
