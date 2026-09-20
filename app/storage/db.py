@@ -210,6 +210,15 @@ MIGRATIONS: list[str] = [
         failed_at    TEXT
     );
     """,
+    """
+    -- 수집 소스(할 일·공지·학사일정 등)마다 마지막으로 돌린 시각. 주기가 된 소스만 돌리는 근거.
+    CREATE TABLE eclass_source_state (
+        source       TEXT PRIMARY KEY,
+        last_run_at  TEXT NOT NULL,
+        last_ok_at   TEXT,
+        last_reason  TEXT NOT NULL DEFAULT ''
+    );
+    """,
 ]
 
 

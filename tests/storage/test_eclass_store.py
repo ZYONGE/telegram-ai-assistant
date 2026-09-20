@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 import pytest
 
 from app.storage.eclass import (
@@ -5,6 +7,7 @@ from app.storage.eclass import (
     EclassHealthStore,
     EclassItem,
     EclassRepository,
+    EclassSourceStateStore,
     ItemChange,
 )
 from tests.conftest import kst
@@ -127,3 +130,47 @@ async def test_clear_lets_the_user_retry_after_fixing_the_password(health):
     await health.record_failure("login", NOW)
     await health.clear()
     assert (await health.read()).login_blocked is False
+
+
+# --- 소스별 주기 ---
+
+
+@pytest.fixture
+def source_state(db):
+    return EclassSourceStateStore(db)
+
+
+async def test_a_source_runs_the_first_time(source_state):
+    assert await source_state.due("todo", timedelta(hours=24), NOW) is True
+
+
+async def test_a_source_waits_out_its_interval(source_state):
+    await source_state.record_run("todo", NOW, ok=True)
+    assert await source_state.due("todo", timedelta(hours=24), NOW + timedelta(hours=6)) is False
+    assert await source_state.due("todo", timedelta(hours=24), NOW + timedelta(hours=24)) is True
+
+
+async def test_a_few_seconds_late_does_not_skip_a_whole_turn(source_state):
+    """예약이 몇 초 밀려 들어와도 한 주기를 통째로 건너뛰지 않는다."""
+    await source_state.record_run("todo", NOW, ok=True)
+    almost = NOW + timedelta(hours=24) - timedelta(seconds=20)
+    assert await source_state.due("todo", timedelta(hours=24), almost) is True
+
+
+async def test_no_interval_means_every_turn(source_state):
+    await source_state.record_run("todo", NOW, ok=True)
+    assert await source_state.due("todo", timedelta(0), NOW) is True
+
+
+async def test_a_failed_run_keeps_the_last_success(source_state):
+    await source_state.record_run("todo", NOW, ok=True)
+    await source_state.record_run("todo", NOW + timedelta(hours=1), ok=False, reason="layout")
+
+    state = await source_state.read("todo")
+    assert state.last_ok_at == NOW and state.last_run_at == NOW + timedelta(hours=1)
+    assert state.last_reason == "layout"
+
+
+async def test_sources_are_counted_separately(source_state):
+    await source_state.record_run("todo", NOW, ok=True)
+    assert await source_state.due("notice", timedelta(hours=24), NOW) is True

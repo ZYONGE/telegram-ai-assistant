@@ -1,10 +1,19 @@
+from datetime import datetime, timedelta
+
 import pytest
 
 from app.collectors.eclass.collector import BLOCKED_MESSAGE, EclassCollector
 from app.collectors.eclass.session import EclassError, Failure
 from app.core.config import EclassSettings
-from app.core.events import EventKind, EventSource
-from app.storage.eclass import EclassHealthStore, EclassRepository
+from app.collectors.eclass.sources import SourceResult
+from app.core.events import Event, EventKind, EventSource
+from app.storage.eclass import (
+    EclassHealthStore,
+    EclassItem,
+    EclassRepository,
+    EclassSourceStateStore,
+    ItemChange,
+)
 from tests.conftest import kst
 
 NOW = kst(9, 20, 9)
@@ -59,12 +68,18 @@ class FakeSession:
 
 @pytest.fixture
 def stores(db):
-    return EclassRepository(db), EclassHealthStore(db)
+    return EclassRepository(db), EclassHealthStore(db), EclassSourceStateStore(db)
 
 
-def collector(stores, session, settings: EclassSettings = SETTINGS) -> EclassCollector:
-    items, health = stores
-    return EclassCollector(settings, items, health, lambda: NOW, session)
+def collector(
+    stores,
+    session,
+    settings: EclassSettings = SETTINGS,
+    sources=None,
+    now: datetime = NOW,
+) -> EclassCollector:
+    items, health, state = stores
+    return EclassCollector(settings, items, health, state, lambda: now, session, sources)
 
 
 # --- 정상 수집 ---
@@ -172,7 +187,7 @@ async def test_broken_layout_is_reported(stores):
 
 
 async def test_long_silence_adds_a_second_alert(stores):
-    items, health = stores
+    _items, health, _state = stores
     await health.record_success(kst(9, 18, 9))
     session = FakeSession(error=EclassError(Failure.NETWORK, "연결 실패"))
 
@@ -187,3 +202,93 @@ async def test_disabled_settings_do_nothing(stores):
     off = EclassSettings(eclass_url="", username="", password="")
     assert await collector(stores, session, off).collect() == []
     assert session.logged_in is False
+
+
+# --- 소스 여러 개 ---
+
+
+class FakeSource:
+    """화면 하나를 흉내 낸다. 정해진 항목을 돌려주거나 실패한다."""
+
+    def __init__(
+        self,
+        key: str,
+        *,
+        items: list[EclassItem] | None = None,
+        error: EclassError | None = None,
+        interval: timedelta = timedelta(0),
+    ) -> None:
+        self.key = key
+        self.label = key
+        self.interval = interval
+        self.calls = 0
+        self._items = items or []
+        self._error = error
+
+    async def fetch(self, session, courses) -> SourceResult:
+        self.calls += 1
+        if self._error:
+            raise self._error
+        return SourceResult(list(self._items))
+
+    def event_for(self, item: EclassItem, change: ItemChange, now: datetime) -> Event | None:
+        if change is ItemChange.SAME:
+            return None
+        return Event(
+            source=EventSource.ECLASS, kind=EventKind.NOTICE, title=item.title, ref_id=item.item_id
+        )
+
+
+def item(item_id: str, title: str) -> EclassItem:
+    return EclassItem(item_id=item_id, kind="공지", title=title)
+
+
+async def test_one_broken_source_does_not_stop_the_others(stores):
+    broken = FakeSource("notice", error=EclassError(Failure.LAYOUT, "읽지 못했습니다"))
+    working = FakeSource("message", items=[item("eclass:msg:1", "쪽지 한 통")])
+
+    events = await collector(stores, FakeSession(), sources=[broken, working]).collect()
+
+    assert "쪽지 한 통" in [event.title for event in events]
+    assert working.calls == 1
+    failure = next(event for event in events if event.kind == EventKind.COLLECTOR_FAILED)
+    # 어느 화면이 막혔는지 이름을 붙여 알린다
+    assert failure.meta["reason"] == "notice:layout" and "notice" in failure.body
+    # 한 소스가 막혔다고 수집기가 멈춘 것은 아니다
+    assert (await stores[1].read()).fail_count == 0
+
+
+async def test_every_source_failing_is_a_collector_failure(stores):
+    one = FakeSource("notice", error=EclassError(Failure.LAYOUT, "읽지 못했습니다"))
+    two = FakeSource("message", error=EclassError(Failure.NETWORK, "연결 실패"))
+
+    events = await collector(stores, FakeSession(), sources=[one, two]).collect()
+
+    assert len(events) == 1 and events[0].meta["reason"] == "layout"
+    assert (await stores[1].read()).fail_count == 1
+
+
+async def test_a_slow_source_waits_for_its_turn(stores):
+    daily = FakeSource(
+        "syllabus", items=[item("eclass:syllabus:1", "강의계획서")], interval=timedelta(hours=24)
+    )
+    assert len(await collector(stores, FakeSession(), sources=[daily]).collect()) == 1
+
+    # 한 시간 뒤에는 아직 차례가 아니다. 로그인조차 하지 않는다.
+    quiet = FakeSession()
+    later = collector(stores, quiet, sources=[daily], now=NOW + timedelta(hours=1))
+    assert await later.collect() == []
+    assert daily.calls == 1 and quiet.logged_in is False
+
+    # 하루가 지나면 다시 본다
+    await collector(stores, FakeSession(), sources=[daily], now=NOW + timedelta(hours=24)).collect()
+    assert daily.calls == 2
+
+
+async def test_a_failed_source_is_tried_again_next_turn(stores):
+    flaky = FakeSource("notice", error=EclassError(Failure.NETWORK, "연결 실패"))
+    working = FakeSource("message", items=[item("eclass:msg:1", "쪽지 한 통")])
+
+    await collector(stores, FakeSession(), sources=[flaky, working]).collect()
+    await collector(stores, FakeSession(), sources=[flaky, working]).collect()
+    assert flaky.calls == 2

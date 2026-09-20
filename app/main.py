@@ -46,7 +46,7 @@ from app.scheduler.ingest import Ingestor
 from app.scheduler.tasks import TaskService
 from app.storage.archive import ArchiveRepository
 from app.storage.conversation import ConversationStore, PendingActionStore
-from app.storage.eclass import EclassHealthStore, EclassRepository
+from app.storage.eclass import EclassHealthStore, EclassRepository, EclassSourceStateStore
 from app.storage.location import LocationStore
 from app.storage.mail import MailCleanupLog, MailRuleRepository, MailStateStore, WaitingReplyStore
 from app.storage.db import Database
@@ -152,7 +152,9 @@ async def create_runtime(settings: Settings, bot: Bot, llm: LLM | None = None) -
         light,
         honorific,
     )
-    eclass_collector = EclassCollector(settings.eclass, EclassRepository(db), EclassHealthStore(db))
+    eclass_collector = EclassCollector(
+        settings.eclass, EclassRepository(db), EclassHealthStore(db), EclassSourceStateStore(db)
+    )
     mail_collector = MailCollector(
         google,
         mail_rules,

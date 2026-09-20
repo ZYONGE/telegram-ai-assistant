@@ -17,6 +17,9 @@ from app.storage.db import Database, from_db_time, to_db_time
 # 로그인 실패가 이만큼 이어지면 자동화를 멈춘다
 MAX_LOGIN_FAILURES = 2
 
+# 주기 판정의 여유. 예약이 몇 초 밀렸다고 다음 주기까지 통째로 건너뛰지 않게 한다.
+DUE_TOLERANCE = timedelta(minutes=1)
+
 
 class ItemChange(StrEnum):
     NEW = "new"
@@ -169,3 +172,60 @@ def _item(row: aiosqlite.Row) -> StoredItem:
         first_seen_at=from_db_time(row["first_seen_at"]),
         updated_at=from_db_time(row["updated_at"]),
     )
+
+
+@dataclass(frozen=True, slots=True)
+class SourceState:
+    """수집 소스 하나의 마지막 수행 기록."""
+
+    source: str
+    last_run_at: datetime
+    last_ok_at: datetime | None = None
+    last_reason: str = ""
+
+
+class EclassSourceStateStore:
+    """소스별 수집 주기를 관리한다.
+
+    수집기는 예약된 주기마다 깨어나지만, 소스마다 볼 간격이 다르다
+    (할 일은 매번, 강의계획서는 하루 한 번). 마지막으로 돌린 시각을 기억해
+    주기가 된 소스만 돌린다.
+    """
+
+    def __init__(self, db: Database) -> None:
+        self._conn = db.conn
+
+    async def due(self, source: str, interval: timedelta, now: datetime) -> bool:
+        """이 소스를 지금 돌릴 차례인지. 한 번도 안 돌렸으면 돌린다."""
+        state = await self.read(source)
+        if state is None:
+            return True
+        # 예약 시각이 몇 초씩 밀리는 것 때문에 한 주기를 통째로 건너뛰지 않도록 여유를 둔다
+        return now - state.last_run_at >= interval - DUE_TOLERANCE
+
+    async def record_run(self, source: str, now: datetime, ok: bool, reason: str = "") -> None:
+        previous = await self.read(source)
+        last_ok = now if ok else (previous.last_ok_at if previous else None)
+        await self._conn.execute(
+            """
+            INSERT INTO eclass_source_state (source, last_run_at, last_ok_at, last_reason) VALUES (?, ?, ?, ?)
+            ON CONFLICT (source) DO UPDATE SET last_run_at = excluded.last_run_at,
+                last_ok_at = excluded.last_ok_at, last_reason = excluded.last_reason
+            """,
+            (source, to_db_time(now), to_db_time(last_ok), "" if ok else reason),
+        )
+        await self._conn.commit()
+
+    async def read(self, source: str) -> SourceState | None:
+        async with self._conn.execute(
+            "SELECT * FROM eclass_source_state WHERE source = ?", (source,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return SourceState(
+            source=row["source"],
+            last_run_at=from_db_time(row["last_run_at"]),
+            last_ok_at=from_db_time(row["last_ok_at"]),
+            last_reason=row["last_reason"] or "",
+        )
