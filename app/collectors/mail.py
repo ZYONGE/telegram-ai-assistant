@@ -145,7 +145,8 @@ class MailCollector:
             try:
                 if await account.gmail.thread_has_reply(item.thread_id, item.created_at):
                     await self._waiting.resolve(item.id, now)
-                    logger.info("답변 대기를 해제했습니다: %s", item.subject[:30])
+                    # 제목은 남기지 않는다. 로그는 개인 파일이지만 굳이 옮겨 적을 까닭이 없다.
+                    logger.info("답변 대기 1건을 해제했습니다 (%s 계정)", account.label)
             except GoogleApiError:
                 continue
         return []

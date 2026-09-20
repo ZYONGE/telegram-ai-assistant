@@ -4,6 +4,7 @@
 """
 
 import logging
+from logging.handlers import RotatingFileHandler
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -28,7 +29,7 @@ from app.collectors.mail import MailCollector
 from app.collectors.weather import KmaWeather
 from app.channels.telegram_bot import SERVICES_KEY, ChatHandlers, ChatServices
 from app.core.clock import KST, to_kst, utc_now
-from app.core.config import ConfigError, NotificationSettings, Settings, load_settings
+from app.core.config import LoggingSettings, ConfigError, NotificationSettings, Settings, load_settings
 from app.core.interfaces import BriefingKind
 from app.google.accounts import GoogleAccounts
 from app.mail.service import MailService
@@ -68,6 +69,7 @@ from app.tools.todos import todo_tools
 from app.tools.weather import weather_tools
 
 logger = logging.getLogger("app")
+LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 
 # 실시간 위치 공유는 edited_message로 들어온다
 ALLOWED_UPDATES = ["message", "edited_message", "callback_query"]
@@ -367,13 +369,40 @@ def build_application(settings: Settings) -> Application:
     return application
 
 
+def setup_logging(settings: LoggingSettings) -> None:
+    """화면에는 늘 남기고, 정해져 있으면 파일에도 남긴다.
+
+    파일은 정해진 크기에서 넘어가며 몇 개만 남는다. 로그가 디스크를 채우지 않게 한다.
+    """
+    root = logging.getLogger()
+    if settings.file is None:
+        return
+    try:
+        settings.file.parent.mkdir(parents=True, exist_ok=True)
+        handler = RotatingFileHandler(
+            settings.file,
+            maxBytes=settings.max_mb * 1024 * 1024,
+            backupCount=settings.backups,
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        # 파일에 못 남긴다고 비서가 안 뜰 까닭은 없다
+        logger.warning("로그 파일을 열지 못했습니다 (%s). 화면에만 남깁니다.", type(exc).__name__)
+        return
+    handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    root.addHandler(handler)
+    logger.info("로그 파일: %s (%dMB씩 %d개)", settings.file.name, settings.max_mb, settings.backups)
+
+
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
     # 토큰이 들어간 요청 URL이 로그에 남지 않게 한다
     for noisy in ("httpx", "google_genai", "telegram.ext", "apscheduler"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
     try:
-        application = build_application(load_settings())
+        settings = load_settings()
+        setup_logging(settings.logging)
+        application = build_application(settings)
         logger.info("비서를 시작합니다. 종료하려면 Ctrl+C를 누르세요.")
         application.run_polling(allowed_updates=ALLOWED_UPDATES)
     except ConfigError as exc:

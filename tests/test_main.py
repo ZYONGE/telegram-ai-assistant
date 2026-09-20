@@ -1,3 +1,5 @@
+import logging
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -5,12 +7,14 @@ import pytest
 from telegram.error import InvalidToken
 
 from app import main as app_main
+from app.main import setup_logging
 from app.core.config import (
     BriefingSettings,
     ConfigError,
     ConversationSettings,
     EclassSettings,
     LLMSettings,
+    LoggingSettings,
     MailSettings,
     NotificationSettings,
     Settings,
@@ -28,7 +32,7 @@ class RejectingApplication:
 
 
 def test_rejected_token_is_not_printed(monkeypatch, capsys, caplog):
-    monkeypatch.setattr(app_main, "load_settings", lambda: object())
+    monkeypatch.setattr(app_main, "load_settings", lambda: SimpleNamespace(logging=LoggingSettings()))
     monkeypatch.setattr(app_main, "build_application", lambda settings: RejectingApplication())
 
     with pytest.raises(SystemExit) as exit_info:
@@ -162,3 +166,43 @@ async def test_runtime_registers_every_tool_once(tmp_path):
         }
     finally:
         await runtime.close()
+
+
+# --- 로그 ---
+
+
+def test_logs_go_to_a_rotating_file(tmp_path):
+    target = tmp_path / "logs" / "assistant.log"
+    setup_logging(LoggingSettings(file=target, max_mb=1, backups=3))
+    try:
+        logging.getLogger("app.test").warning("한 줄 남깁니다")
+        assert target.exists()
+        assert "한 줄 남깁니다" in target.read_text(encoding="utf-8")
+        handler = logging.getLogger().handlers[-1]
+        assert handler.maxBytes == 1024 * 1024 and handler.backupCount == 3
+    finally:
+        _drop_file_handlers()
+
+
+def test_no_file_means_screen_only(tmp_path):
+    before = len(logging.getLogger().handlers)
+    setup_logging(LoggingSettings(file=None))
+    assert len(logging.getLogger().handlers) == before
+
+
+def test_a_log_file_we_cannot_open_does_not_stop_the_assistant(tmp_path):
+    """파일에 못 남긴다고 비서가 안 뜰 까닭은 없다."""
+    blocker = tmp_path / "막힘"
+    blocker.write_text("파일이라 폴더를 만들 수 없다", encoding="utf-8")
+    before = len(logging.getLogger().handlers)
+
+    setup_logging(LoggingSettings(file=blocker / "assistant.log"))
+    assert len(logging.getLogger().handlers) == before
+
+
+def _drop_file_handlers() -> None:
+    root = logging.getLogger()
+    for handler in list(root.handlers):
+        if isinstance(handler, RotatingFileHandler):
+            handler.close()
+            root.removeHandler(handler)

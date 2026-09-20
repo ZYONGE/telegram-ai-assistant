@@ -48,6 +48,23 @@ class NotificationSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class LoggingSettings:
+    """로그를 어디에 어떻게 남길지.
+
+    화면(표준 출력)에는 늘 남긴다. 도커가 그것을 받아 간다.
+    파일은 컨테이너를 다시 만들어도 남으므로 지난 일을 되짚을 때 쓴다.
+    수집한 내용이 섞일 수 있어 **개인 파일로 보고 private/ 안에 둔다** (절대 규칙 12).
+    """
+
+    # 비워 두면 파일로 남기지 않는다. 켜는 것은 config.toml에서 정한다.
+    file: Path | None = None
+    # 이 크기를 넘으면 새 파일로 넘어간다 (MB)
+    max_mb: int = 10
+    # 지난 파일을 몇 개까지 두는지
+    backups: int = 5
+
+
+@dataclass(frozen=True, slots=True)
 class StorageSettings:
     db_path: Path
     memory_path: Path
@@ -240,6 +257,7 @@ class Settings:
     google: GoogleSettings = GoogleSettings()
     eclass: EclassSettings = EclassSettings()
     backup: BackupSettings = BackupSettings()
+    logging: LoggingSettings = LoggingSettings()
     mail: MailSettings = MailSettings()
     weather: WeatherSettings = WeatherSettings()
     conversation: ConversationSettings = ConversationSettings()
@@ -319,6 +337,7 @@ def load_settings(
         google = data.get("google", {})
         eclass = data.get("eclass", {})
         backup = data.get("backup", {})
+        logs = data.get("logging", {})
         mail = data.get("mail", {})
         weather = data.get("weather", {})
         conversation = data.get("conversation", {})
@@ -367,6 +386,11 @@ def load_settings(
                 scope=_scope(eclass.get("scope", {})),
                 urgent_words=tuple(str(word) for word in eclass.get("urgent_words", DEFAULT_URGENT_WORDS)),
                 browser_args=tuple(str(arg) for arg in eclass.get("browser_args", ())),
+            ),
+            logging=LoggingSettings(
+                file=path(logs["file"]) if logs.get("file") else None,
+                max_mb=int(logs.get("max_mb", 10)),
+                backups=int(logs.get("backups", 5)),
             ),
             backup=BackupSettings(
                 at=_time(backup, "at", BackupSettings().at),
