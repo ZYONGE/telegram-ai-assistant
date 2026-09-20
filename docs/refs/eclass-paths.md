@@ -57,7 +57,7 @@ GET  /ilos/st/course/submain_form.acl      ← 방 첫 화면
 | 실시간강의 | `/ilos/st/course/zoom_list.acl` | |
 | 강의자료 | `/ilos/st/course/lecture_material_list.acl` | 날짜 |
 | 열린게시판 | `/ilos/st/course/material_list_form.acl` | |
-| 강의계획서 | `/ilos/st/course/plan_form.acl` | 학기에 한 번 바뀐다. 하루 1회면 충분 |
+| 강의계획서 | `/ilos/st/course/plan_form.acl` | 게시판이 아니라 `table.bbsview` 두 개(과목 정보, 주차별)다. 한 줄에 이름·내용이 두 쌍씩 들어 있다. 학기에 한 번 바뀌므로 하루 1회 |
 | 출석 | `/ilos/st/course/attendance_list.acl` | |
 | 성적 | `/ilos/st/course/eval3_result_view_form.acl` | |
 | 팀프로젝트 | `/ilos/st/course/project_list.acl` | |
@@ -74,7 +74,7 @@ GET  /ilos/st/course/submain_form.acl      ← 방 첫 화면
 | 보낸 쪽지 | `/ilos/message/sent_list_pop_form.acl` | 자기 자신에게 다시 |
 | 수강 과목 | `/ilos/st/main/course_ing_list_form.acl` → `/ilos/st/main/course_ing_list.acl` | 껍데기 + 내용 |
 | 시간표 | `/ilos/st/main/pop_academic_timetable_form.acl` | 한 번에 |
-| 학사일정 | `/ilos/st/schedule/academic_calendar_list_form.acl` | **미해결.** 화면을 열어도 표가 비어 있다. 달력을 자바스크립트로 그리는 듯하다 |
+| 학사일정 | `/ilos/st/schedule/academic_calendar_list_form.acl` | **내용 없음.** 화면의 `#data_list`를 자바스크립트가 채우는데, 화면이 잦아들 때까지 기다려도·질의를 붙여도·POST로 해도 비어 있다 (2026-09-20 세 방식 확인). 학교가 여기에 학사일정을 넣지 않는 것으로 본다 |
 | 올린 파일함 | `/ilos/mp/file_list_form.acl` → `/ilos/mp/file_list.acl` | 껍데기 + 내용 |
 | 질의응답 | `/ilos/community/qna_list_form.acl` → `/ilos/community/qna_list.acl` | 껍데기 + 내용 |
 

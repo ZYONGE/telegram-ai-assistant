@@ -12,6 +12,7 @@ from pathlib import Path
 from app.collectors.eclass.scope import Screen, ScopeEntry, load_catalog
 from app.collectors.eclass.sources.base import EclassSource
 from app.collectors.eclass.sources.board import BoardSource
+from app.collectors.eclass.sources.syllabus import SyllabusSource
 from app.collectors.eclass.sources.todo import TodoSource
 from app.core.config import Level
 from app.storage.eclass import EclassRepository
@@ -30,6 +31,9 @@ PRIORITY = {Level.NOTIFY: 0, Level.BRIEF: 1, Level.STORE: 2}
 TODO_MARK = "todo_list"
 # 과목방 안에서만 뜻이 있는 화면
 COURSE_PREFIX = "/ilos/st/course/"
+
+# 게시판이 아니라 따로 읽어야 하는 화면. 경로에 이 조각이 있으면 전용 소스를 쓴다.
+SPECIAL = {"plan_form": SyllabusSource}
 
 # 메뉴 글자를 못 주운 화면의 이름. 알림 문구에 그대로 나오므로 사람이 읽을 말로 둔다.
 FALLBACK_LABELS = {
@@ -82,7 +86,8 @@ def build_sources(
             continue
         if TODO_MARK in path:
             continue
-        sources.append(_board(screen, entry, items))
+        special = next((cls for mark, cls in SPECIAL.items() if mark in path), None)
+        sources.append(special(path=path, level=entry.level) if special else _board(screen, entry, items))
 
     logger.info("eClass 소스 %d개 (할 일 포함)", len(sources))
     return sources

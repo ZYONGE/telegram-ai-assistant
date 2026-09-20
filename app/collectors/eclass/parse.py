@@ -295,6 +295,24 @@ def parse_list(html: str, now: datetime | None = None) -> ParseResult:
     return ParseResult(rows, skipped)
 
 
+def parse_syllabus(html: str) -> list[tuple[str, str]]:
+    """강의계획서. 표 두 개(과목 정보, 주차별 계획)를 이름·내용 짝으로 편다.
+
+    학기에 한 번 바뀌는 정적 문서다. 평가 방식·교재·강의시간을 비서가 참고한다.
+    교수 연락처가 들어 있으므로 저장한 뒤 로그에 남기지 않는다.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    pairs: list[tuple[str, str]] = []
+    for row in soup.select("table.bbsview tr"):
+        cells = row.select("th, td")
+        # 한 줄에 이름·내용이 두 쌍씩 들어 있는 표다
+        for index in range(0, len(cells) - 1, 2):
+            name, value = _text(cells[index]), _text(cells[index + 1])
+            if name and value:
+                pairs.append((name, value))
+    return pairs
+
+
 def parse_body(html: str) -> str:
     """글 본문. 외부에서 온 글이므로 읽어 두기만 한다 (절대 규칙 8)."""
     soup = BeautifulSoup(html, "html.parser")

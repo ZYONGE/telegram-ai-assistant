@@ -66,7 +66,8 @@ unknown = "off"
 notify_paths = ["notice", "notification", "todo_list", "message", "calendar", "schedule"]
 store_paths = ["material", "plan_form", "attendance", "attend_list", "eval", "discuss", "qna", "file_list", "report_list", "test_list", "project_list", "online_list", "zoom_list", "record_list"]
 # 게시판이 아닌 화면(수강 과목 목록·시간표)은 글 목록 파서로 읽으면 엉뚱한 것이 담긴다.
-off_paths = ["guide", "survey", "share", "ocw", "introduce", "myinfo", "clicker", "menual", "career", "site_link", "sent_list", "popup", "/pf/", "course_ing", "academic_timetable"]
+# 학사일정은 eClass 화면이 비어 있다 (세 가지 요청 방식 모두 확인, 2026-09-20). 학교 포털을 봐야 한다.
+off_paths = ["guide", "survey", "share", "ocw", "introduce", "myinfo", "clicker", "menual", "career", "site_link", "sent_list", "popup", "/pf/", "course_ing", "academic_timetable", "academic_calendar"]
 # 경로로 못 정하면 메뉴 이름을 본다. 이름은 외부에서 온 글자라 규칙에 넣기만 한다.
 notify_words = ["공지", "알림", "쪽지", "과제", "시험", "퀴즈", "휴강", "보강", "학사일정"]
 store_words = ["자료", "게시판", "계획서", "출석", "성적", "토론", "질의"]

@@ -7,12 +7,14 @@
 from app.collectors.eclass.sources.base import EclassSource, SourceResult
 from app.collectors.eclass.sources.board import BoardSource
 from app.collectors.eclass.sources.build import build_sources
+from app.collectors.eclass.sources.syllabus import SyllabusSource
 from app.collectors.eclass.sources.todo import TodoSource
 
 __all__ = [
     "BoardSource",
     "EclassSource",
     "SourceResult",
+    "SyllabusSource",
     "TodoSource",
     "build_sources",
     "default_sources",
