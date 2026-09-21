@@ -247,6 +247,10 @@ class WeatherSettings:
     location_ttl_hours: int = 0
     # 이 시간 안에 받은 위치는 "현재 위치", 그보다 오래되면 "마지막 위치"로 표시한다
     location_recent_hours: int = 6
+    # 더위·추위를 타는 정도. 양수면 더위를 많이 타는 편이라 그만큼 따뜻한 날로 보고 옷을 가볍게 권한다.
+    feels_warmer: float = 0.0
+    # 강수확률이 이 이상이면 우산을 권한다. 비·빗방울 예보가 있으면 확률과 상관없이 권한다.
+    umbrella_chance: int = 60
 
 
 @dataclass(frozen=True, slots=True)
@@ -514,6 +518,8 @@ def _weather(section: Mapping[str, Any], env: Mapping[str, str]) -> WeatherSetti
         follow_telegram_location=bool(section.get("follow_telegram_location", True)),
         location_ttl_hours=int(section.get("location_ttl_hours", 0)),
         location_recent_hours=int(section.get("location_recent_hours", 6)),
+        feels_warmer=float(section.get("feels_warmer", 0.0)),
+        umbrella_chance=int(section.get("umbrella_chance", 60)),
     )
 
 

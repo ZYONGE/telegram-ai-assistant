@@ -301,3 +301,26 @@ async def test_tool_asks_for_location_when_unknown():
     async with client:
         result = await weather_tools(weather, clock=lambda: kst(9, 18, 7))[0].run({})
     assert result.is_error is True and result.content == NO_LOCATION_MESSAGE
+
+
+def test_clothing_follows_how_warm_the_user_runs():
+    """더위를 타는 편이면 같은 기온에서도 한 단계 가볍게 권한다 (설정 feels_warmer)."""
+    from dataclasses import replace
+
+    from app.collectors.weather import SlotForecast
+
+    day = build_forecast(SAMPLE, kst(9, 18, 7).date())
+    cool = replace(day, slots=(SlotForecast("아침", 16.0, "맑음", "", 0),), low=16.0, high=16.0)
+    assert "자켓이나 야상" in cool.clothing()
+    assert "얇은 니트" in replace(cool, feels_warmer=2.0).clothing()
+
+
+def test_a_lower_umbrella_line_catches_light_rain():
+    from dataclasses import replace
+
+    from app.collectors.weather import SlotForecast
+
+    day = build_forecast(SAMPLE, kst(9, 18, 7).date())
+    drizzle = replace(day, slots=(SlotForecast("점심", 20.0, "흐림", "", 40),))
+    assert "우산" not in drizzle.clothing()
+    assert "우산" in replace(drizzle, umbrella_chance=30).clothing()

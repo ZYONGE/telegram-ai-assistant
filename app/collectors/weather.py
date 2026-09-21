@@ -7,7 +7,7 @@
 
 import logging
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from typing import Protocol
 
@@ -95,6 +95,9 @@ class DayForecast:
     slots: tuple[SlotForecast, ...]
     low: float | None
     high: float | None
+    # 사용자가 더위를 타는 정도 (설정 feels_warmer). 옷차림 구간을 이만큼 따뜻하게 본다.
+    feels_warmer: float = 0.0
+    umbrella_chance: int = UMBRELLA_CHANCE
 
     @property
     def temps(self) -> list[float]:
@@ -119,13 +122,13 @@ class DayForecast:
         temps = self.temps
         if not temps:
             return "옷차림: 기온 정보가 없어 기본안을 내지 못했습니다."
-        basis = min(temps)
+        basis = min(temps) + self.feels_warmer
         advice = next(text for limit, text in CLOTHING if basis >= limit)
         notes = [f"옷차림: {advice}"]
         gap = self.gap
         if gap is not None and gap >= BIG_GAP:
             notes.append(f"일교차가 {gap:.0f}도라 겉옷을 챙기세요.")
-        wet = [slot for slot in self.slots if slot.rain or slot.rain_chance >= UMBRELLA_CHANCE]
+        wet = [slot for slot in self.slots if slot.rain or slot.rain_chance >= self.umbrella_chance]
         if wet:
             when = ", ".join(slot.name for slot in wet)
             notes.append(f"{when}에 비 소식이 있어 우산을 챙기세요.")
@@ -309,4 +312,7 @@ class KmaWeather:
         except ValueError:
             raise WeatherUnavailable("기상청 응답을 읽지 못했습니다.") from None
         day = (to_kst(now) + timedelta(days=days_ahead)).date()
-        return build_forecast(read_items(payload), day, place)
+        forecast = build_forecast(read_items(payload), day, place)
+        return replace(
+            forecast, feels_warmer=self._settings.feels_warmer, umbrella_chance=self._settings.umbrella_chance
+        )
