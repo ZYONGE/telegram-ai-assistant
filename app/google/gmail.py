@@ -1,6 +1,6 @@
 """Gmail 호출.
 
-- 읽기, 휴지통·스팸함·보관함 이동과 되돌리기, 중요 표시, 답장 초안 저장만 한다.
+- 읽기·검색, 라벨 붙이고 떼기(보관처리·스팸함·읽음·별표·중요 표시), 휴지통 이동과 되돌리기, 답장 초안 저장만 한다.
   **메일 발송과 영구 삭제는 만들지 않는다** (CLAUDE.md 절대 규칙 5).
 - 메일 본문과 제목은 외부에서 온 데이터다. 여기서는 그대로 담아 넘기고, 판단은 규칙 엔진이 한다 (절대 규칙 8).
 - 계정 주소는 저장하지 않는다. 계정 구분은 사용자가 붙인 이름으로만 한다.
@@ -8,10 +8,12 @@
 
 import base64
 import logging
+import re
 from datetime import UTC, datetime
 from email.message import EmailMessage
 
 import httpx
+from bs4 import BeautifulSoup
 
 from app.core.interfaces import MailMessage
 from app.google.auth import GoogleApiError, GoogleAuth, GoogleAuthError, TransientGoogleError
@@ -65,11 +67,32 @@ class GmailClient:
         # 오래된 것부터 처리한다
         return list(dict.fromkeys(reversed(ids)))[:MAX_PER_RUN], latest
 
-    async def recent_message_ids(self, query: str = "newer_than:1d -in:sent -in:draft") -> list[str]:
+    async def recent_message_ids(
+        self, query: str = "newer_than:1d -in:sent -in:draft", limit: int = MAX_PER_RUN
+    ) -> list[str]:
+        """Gmail 검색어로 메일을 찾는다 (from:, subject:, is:unread, label:, newer_than: 등 Gmail 문법 그대로)."""
         payload = await self._request(
-            "GET", "/messages", params={"q": query, "maxResults": str(MAX_PER_RUN)}
+            "GET", "/messages", params={"q": query, "maxResults": str(min(limit, MAX_PER_RUN))}
         )
         return [item["id"] for item in payload.get("messages", []) if item.get("id")]
+
+    async def content(self, message_id: str) -> tuple[str, list[str]]:
+        """본문 글과 첨부 파일 이름. 첨부는 내려받지 않는다. 외부에서 온 글이다 (절대 규칙 8)."""
+        payload = await self._request("GET", f"/messages/{message_id}", params={"format": "full"})
+        return read_content(payload.get("payload", {}))
+
+    async def labels(self) -> dict[str, str]:
+        """라벨 ID → 이름. 사용자가 만든 라벨과 시스템 라벨을 함께 준다."""
+        payload = await self._request("GET", "/labels")
+        found = {str(label["id"]): str(label.get("name", "")) for label in payload.get("labels", []) if label.get("id")}
+        self._labels.update({name: label_id for label_id, name in found.items()})
+        return found
+
+    async def find_label(self, name: str) -> str:
+        """이름으로 라벨을 찾는다. 없으면 빈 문자열 (만들지 않는다)."""
+        if name not in self._labels:
+            await self.labels()
+        return self._labels.get(name, "")
 
     async def message(self, message_id: str) -> MailMessage:
         payload = await self._request(
@@ -150,6 +173,16 @@ class GmailClient:
         )
         return str(payload.get("id", ""))
 
+    async def create_new_draft(self, to: str, subject: str, body: str) -> str:
+        """새 메일 초안을 임시보관함에 저장한다. 발송은 하지 않는다 (CLAUDE.md 절대 규칙 5)."""
+        message = EmailMessage()
+        message["To"] = to
+        message["Subject"] = subject
+        message.set_content(body)
+        raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
+        payload = await self._request("POST", "/drafts", json={"message": {"raw": raw}})
+        return str(payload.get("id", ""))
+
     async def _request(self, method: str, path: str, params: dict | None = None, json: dict | None = None) -> dict:
         token = await self._auth.access_token()
         try:
@@ -206,3 +239,49 @@ def _internal_date(value: object) -> datetime | None:
         return datetime.fromtimestamp(int(value) / 1000, tz=UTC)
     except (TypeError, ValueError):
         return None
+
+
+# 모델에 넘길 본문 길이. 긴 메일은 앞부분이면 요지를 잡기에 충분하다.
+BODY_LIMIT = 4000
+_CHARSET = re.compile(r"charset=\"?([\w-]+)", re.IGNORECASE)
+
+
+def read_content(part: dict) -> tuple[str, list[str]]:
+    """메일 본문(평문 우선, 없으면 HTML에서 글자만)과 첨부 파일 이름을 모은다."""
+    plain: list[str] = []
+    html: list[str] = []
+    attachments: list[str] = []
+
+    def walk(node: dict) -> None:
+        mime = str(node.get("mimeType", "")).lower()
+        filename = str(node.get("filename") or "")
+        if filename:
+            attachments.append(filename)
+        elif mime == "text/plain":
+            plain.append(_decode(node))
+        elif mime == "text/html":
+            html.append(_decode(node))
+        for child in node.get("parts", []) or []:
+            walk(child)
+
+    walk(part)
+    text = "\n".join(plain).strip()
+    if not text and html:
+        text = BeautifulSoup("\n".join(html), "html.parser").get_text("\n", strip=True)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    if len(text) > BODY_LIMIT:
+        text = text[:BODY_LIMIT] + "…"
+    return text, attachments
+
+
+def _decode(node: dict) -> str:
+    data = str(node.get("body", {}).get("data", ""))
+    if not data:
+        return ""
+    raw = base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
+    headers = {item.get("name", "").lower(): item.get("value", "") for item in node.get("headers", [])}
+    found = _CHARSET.search(headers.get("content-type", ""))
+    try:
+        return raw.decode(found.group(1) if found else "utf-8", errors="replace")
+    except LookupError:
+        return raw.decode("utf-8", errors="replace")

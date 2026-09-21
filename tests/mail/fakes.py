@@ -41,7 +41,11 @@ class FakeGmail:
         self.filed: list[tuple[str, str]] = []
         self.unfiled: list[tuple[str, str]] = []
         self.important: list[str] = []
-        self.labels: dict[str, str] = {}
+        self.created_labels: dict[str, str] = {}
+        self.labels_by_name: dict[str, str] = {}
+        self.modified: list[tuple[str, tuple[str, ...], tuple[str, ...]]] = []
+        self.bodies: dict[str, tuple[str, list[str]]] = {}
+        self.queries: list[str] = []
         self.drafts: list[tuple[str, str, str, str]] = []
         self.replied_threads: set[str] = set()
         self.fail_with: Exception | None = None
@@ -55,10 +59,25 @@ class FakeGmail:
             raise self.fail_with
         return list(self.messages), self.history_id
 
-    async def recent_message_ids(self, query: str = "") -> list[str]:
+    async def recent_message_ids(self, query: str = "", limit: int = 25) -> list[str]:
         if self.fail_with:
             raise self.fail_with
-        return list(self.messages)
+        self.queries.append(query)
+        return list(self.messages)[:limit]
+
+    async def content(self, message_id: str) -> tuple[str, list[str]]:
+        return self.bodies.get(message_id, ("", []))
+
+    async def labels(self) -> dict[str, str]:
+        return {label_id: name for name, label_id in self.labels_by_name.items()}
+
+    async def find_label(self, name: str) -> str:
+        return self.labels_by_name.get(name, "")
+
+    async def modify(self, message_id: str, add: tuple[str, ...] = (), remove: tuple[str, ...] = ()) -> None:
+        if self.fail_with:
+            raise self.fail_with
+        self.modified.append((message_id, tuple(add), tuple(remove)))
 
     async def message(self, message_id: str) -> MailMessage:
         return self.messages[message_id]
@@ -81,7 +100,9 @@ class FakeGmail:
         self.important.append(message_id)
 
     async def label_id(self, name: str) -> str:
-        return self.labels.setdefault(name, f"Label_{len(self.labels) + 1}")
+        label_id = self.created_labels.setdefault(name, f"Label_{len(self.created_labels) + 1}")
+        self.labels_by_name.setdefault(name, label_id)
+        return label_id
 
     async def file_under(self, message_id: str, label_id: str) -> None:
         self.filed.append((message_id, label_id))
@@ -91,6 +112,10 @@ class FakeGmail:
 
     async def thread_has_reply(self, thread_id: str, after: datetime) -> bool:
         return thread_id in self.replied_threads
+
+    async def create_new_draft(self, to: str, subject: str, body: str) -> str:
+        self.drafts.append(("", to, subject, body))
+        return f"draft-{len(self.drafts)}"
 
     async def create_draft(self, thread_id: str, to: str, subject: str, body: str) -> str:
         self.drafts.append((thread_id, to, subject, body))

@@ -30,6 +30,7 @@ from app.collectors.eclass.collector import EclassCollector
 from app.collectors.eclass.scope import ScopeStore, ensure_scope
 from app.collectors.eclass.sources import build_sources
 from app.collectors.mail import MailCollector
+from app.mail.mailbox import Mailbox
 from app.mail.rules import AutoPolicy
 from app.collectors.weather import KmaWeather
 from app.channels.telegram_bot import SERVICES_KEY, ChatHandlers, ChatServices
@@ -67,6 +68,7 @@ from app.tools.archive import archive_tools
 from app.tools.calendar import calendar_tools, not_connected_tools
 from app.tools.eclass import eclass_tools
 from app.tools.eclass_browse import eclass_browse_tools
+from app.tools.mailbox import mailbox_tools, not_connected_mailbox_tools
 from app.tools.mail import mail_tools, not_connected_mail_tools
 from app.tools.memory import memory_tools
 from app.tools.registry import ToolRegistry
@@ -149,6 +151,7 @@ async def create_runtime(settings: Settings, bot: Bot, llm: LLM | None = None) -
         *archive_tools(archive, http, light),
         *(calendar_tools(google) if google.ready else not_connected_tools()),
         *(mail_tools(google, mail_rules, mail) if google.ready else not_connected_mail_tools()),
+        *(mailbox_tools(google, Mailbox(google)) if google.ready else not_connected_mailbox_tools()),
         *(eclass_tools(eclass_scope, eclass_items) if settings.eclass.enabled else ()),
         *(eclass_browse_tools(eclass_browser) if settings.eclass.enabled else ()),
     )

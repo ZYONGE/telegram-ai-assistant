@@ -103,7 +103,7 @@ async def test_payment_mail_is_filed_as_a_receipt_without_an_alert(stores):
     events = await collector(accounts, stores).collect()
 
     assert events == [] and gmail.trashed == []
-    assert gmail.filed == [("m-2", "Label_1")] and gmail.labels == {"Receipt": "Label_1"}
+    assert gmail.filed == [("m-2", "Label_1")] and gmail.created_labels == {"Receipt": "Label_1"}
     cleaned = await stores["cleanup"].since(kst(9, 18, 0))
     assert [(record.message_id, record.action, record.label_id) for record in cleaned] == [("m-2", "file", "Label_1")]
 
