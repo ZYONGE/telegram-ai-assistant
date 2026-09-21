@@ -8,14 +8,14 @@
 
 import logging
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from app.core.clock import utc_now
 from app.core.events import Event, EventKind, EventSource, collector_failed
 from app.core.interfaces import MailAction, MailMessage
 from app.google.accounts import GoogleAccounts
 from app.google.auth import GoogleApiError, GoogleAuthError
-from app.mail.rules import RuleEngine, Verdict
+from app.mail.rules import OTHER, AutoPolicy, RuleEngine, Verdict
 from app.storage.mail import MailCleanupLog, MailRuleRepository, MailStateStore, WaitingReplyStore
 
 logger = logging.getLogger(__name__)
@@ -24,15 +24,17 @@ logger = logging.getLogger(__name__)
 REPLY_DUE_DAYS = 3
 # 한 번 돌 때 확인할 답변 대기 건수
 MAX_REPLY_CHECKS = 10
-SNIPPET_IN_ALERT = 160
+SNIPPET_IN_ALERT = 300
+# 스레드 전체를 볼 때의 기준 시각 (처음부터)
+EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 
 def alert_text(message: MailMessage, verdict: Verdict, account: str, show_account: bool) -> tuple[str, str]:
     """알림 제목과 본문. 모델을 거치지 않고 코드가 만든다."""
-    who = message.sender_name or message.sender
+    who = f"{message.sender_name} <{message.sender}>" if message.sender_name else message.sender
     where = f"[{account}] " if show_account else ""
     title = f"{where}{verdict.label}: {who}"
-    lines = [message.subject or "(제목 없음)"]
+    lines = [f"제목: {message.subject or '(제목 없음)'}"]
     if message.snippet:
         lines.append(message.snippet[:SNIPPET_IN_ALERT])
     if MailAction.TRACK_REPLY in verdict.actions:
@@ -43,6 +45,8 @@ def alert_text(message: MailMessage, verdict: Verdict, account: str, show_accoun
         lines.append("보호 목록이라 휴지통으로 보내지 않았습니다.")
     elif MailAction.TRASH in verdict.actions:
         lines.append("규칙에 따라 휴지통으로 옮겼습니다.")
+    if MailAction.MARK_IMPORTANT in verdict.actions:
+        lines.append("중요 표시를 해 두었습니다.")
     return title, "\n".join(lines)
 
 
@@ -58,6 +62,8 @@ class MailCollector:
         waiting: WaitingReplyStore,
         protected_domains: frozenset[str] = frozenset(),
         clock: Callable[[], datetime] = utc_now,
+        auto: AutoPolicy | None = None,
+        receipt_label: str = "Receipt",
     ) -> None:
         self._accounts = accounts
         self._rules = rules
@@ -66,11 +72,13 @@ class MailCollector:
         self._waiting = waiting
         self._protected = protected_domains
         self._clock = clock
+        self._auto = auto or AutoPolicy()
+        self._receipt_label = receipt_label
 
     async def collect(self) -> list[Event]:
         if not self._accounts.ready:
             return []
-        engine = RuleEngine(tuple(await self._rules.list_all()), self._protected)
+        engine = RuleEngine(tuple(await self._rules.list_all()), self._protected, self._auto)
         events: list[Event] = []
         for account in self._accounts.connected:
             try:
@@ -98,7 +106,7 @@ class MailCollector:
         events: list[Event] = []
         for message_id in message_ids:
             message = await gmail.message(message_id)
-            verdict = engine.classify(message, account.label)
+            verdict = await self._spare_conversations(gmail, message, engine.classify(message, account.label))
             if not await self._state.mark_seen(account.label, message_id, verdict.kind, message.subject, now):
                 continue
             events += await self._apply(account, message, verdict, now)
@@ -106,12 +114,37 @@ class MailCollector:
         events += await self._check_replies(account, now)
         return events
 
+    async def _spare_conversations(self, gmail, message: MailMessage, verdict: Verdict) -> Verdict:
+        """스팸함으로 보낼 메일이라도, 사용자가 답장한 적 있는 대화면 받은편지함에 둔다."""
+        if MailAction.SPAM not in verdict.actions:
+            return verdict
+        try:
+            if not await gmail.thread_has_reply(message.thread_id, EPOCH):
+                return verdict
+        except GoogleApiError:
+            pass  # 확인하지 못했으면 옮기지 않는 쪽을 고른다
+        return Verdict(OTHER, (MailAction.MORNING_LIST,), f"{verdict.reason} (주고받은 대화라 옮기지 않음)")
+
     async def _apply(self, account, message: MailMessage, verdict: Verdict, now: datetime) -> list[Event]:
+        gmail = account.gmail
+        moved = ""
+        label = ""
         if MailAction.TRASH in verdict.actions:
-            await account.gmail.trash(message.message_id)
+            await gmail.trash(message.message_id)
+            moved = "trash"
+        elif MailAction.SPAM in verdict.actions:
+            await gmail.spam(message.message_id)
+            moved = "spam"
+        elif MailAction.FILE_RECEIPT in verdict.actions:
+            label = await gmail.label_id(self._receipt_label)
+            await gmail.file_under(message.message_id, label)
+            moved = "file"
+        if moved:
             await self._cleanup.record(
-                account.label, message.message_id, message.subject, message.sender, now
+                account.label, message.message_id, message.subject, message.sender, now, moved, label
             )
+        if MailAction.MARK_IMPORTANT in verdict.actions:
+            await gmail.mark_important(message.message_id)
         if MailAction.TRACK_REPLY in verdict.actions:
             await self._waiting.add(
                 account.label,

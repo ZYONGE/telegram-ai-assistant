@@ -52,7 +52,7 @@ def test_unmatched_mail_goes_to_the_morning_list():
 @pytest.mark.parametrize(
     ("kind", "expected"),
     [
-        ("payment", (MailAction.NOTIFY, MailAction.TRASH)),
+        ("payment", (MailAction.EVENING_CLEANUP, MailAction.FILE_RECEIPT)),
         ("professor", (MailAction.NOTIFY, MailAction.TRACK_REPLY)),
         ("company", (MailAction.NOTIFY, MailAction.SUGGEST_SCHEDULE)),
         ("ad", (MailAction.EVENING_CLEANUP, MailAction.TRASH)),

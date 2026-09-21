@@ -216,6 +216,14 @@ class MailSettings:
     poll_minutes: int = 10
     # 이 도메인에서 온 메일은 어떤 규칙에서도 휴지통으로 보내지 않는다
     protected_domains: tuple[str, ...] = ()
+    # 학교 메일 주소의 도메인. 비우면 eClass 주소에서 짐작한다 (eclass.학교.ac.kr → 학교.ac.kr)
+    school_domains: tuple[str, ...] = ()
+    # 등록한 규칙에 맞지 않는 메일을 사용자 지시대로 나눌지 (app/mail/rules.py AutoPolicy)
+    auto: bool = False
+    # 결제·영수증 메일을 옮길 보관함 이름. 없으면 만든다.
+    receipt_label: str = "Receipt"
+    # 기업 주소에서 온 나머지 메일을 스팸함으로 옮길지. false면 받은편지함에 두고 아침 목록에만 넣는다.
+    corporate_to_spam: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -415,6 +423,10 @@ def load_settings(
             mail=MailSettings(
                 poll_minutes=int(mail.get("poll_minutes", 10)),
                 protected_domains=tuple(str(item).lower() for item in mail.get("protected_domains", ())),
+                school_domains=tuple(str(item).lower() for item in mail.get("school_domains", ())),
+                auto=bool(mail.get("auto", {}).get("enabled", False)),
+                receipt_label=str(mail.get("auto", {}).get("receipt_label", "Receipt")),
+                corporate_to_spam=bool(mail.get("auto", {}).get("corporate_to_spam", False)),
             ),
             weather=_weather(weather, env),
             conversation=ConversationSettings(

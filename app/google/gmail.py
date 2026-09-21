@@ -1,6 +1,7 @@
 """Gmail 호출.
 
-- 읽기, 휴지통 이동·되돌리기, 답장 초안 저장만 한다. **메일 발송과 영구 삭제는 만들지 않는다** (CLAUDE.md 절대 규칙 5).
+- 읽기, 휴지통·스팸함·보관함 이동과 되돌리기, 중요 표시, 답장 초안 저장만 한다.
+  **메일 발송과 영구 삭제는 만들지 않는다** (CLAUDE.md 절대 규칙 5).
 - 메일 본문과 제목은 외부에서 온 데이터다. 여기서는 그대로 담아 넘기고, 판단은 규칙 엔진이 한다 (절대 규칙 8).
 - 계정 주소는 저장하지 않는다. 계정 구분은 사용자가 붙인 이름으로만 한다.
 """
@@ -29,6 +30,8 @@ class GmailClient:
     def __init__(self, auth: GoogleAuth, http: httpx.AsyncClient) -> None:
         self._auth = auth
         self._http = http
+        # 라벨 이름 → ID. 한 번 찾으면 다시 묻지 않는다.
+        self._labels: dict[str, str] = {}
 
     @property
     def configured(self) -> bool:
@@ -94,6 +97,46 @@ class GmailClient:
 
     async def untrash(self, message_id: str) -> None:
         await self._request("POST", f"/messages/{message_id}/untrash")
+
+    async def modify(self, message_id: str, add: tuple[str, ...] = (), remove: tuple[str, ...] = ()) -> None:
+        """라벨을 붙이고 뗀다. 스팸함·보관함 이동과 중요 표시가 모두 이것이다. 지우지는 않는다."""
+        await self._request(
+            "POST", f"/messages/{message_id}/modify", json={"addLabelIds": list(add), "removeLabelIds": list(remove)}
+        )
+
+    async def spam(self, message_id: str) -> None:
+        await self.modify(message_id, add=("SPAM",), remove=("INBOX",))
+
+    async def unspam(self, message_id: str) -> None:
+        await self.modify(message_id, add=("INBOX",), remove=("SPAM",))
+
+    async def mark_important(self, message_id: str) -> None:
+        await self.modify(message_id, add=("IMPORTANT",))
+
+    async def file_under(self, message_id: str, label_id: str) -> None:
+        """보관함(라벨)으로 옮긴다. 받은편지함에서만 빠지고 메일은 그대로 있다."""
+        await self.modify(message_id, add=(label_id,), remove=("INBOX",))
+
+    async def unfile(self, message_id: str, label_id: str) -> None:
+        await self.modify(message_id, add=("INBOX",), remove=(label_id,))
+
+    async def label_id(self, name: str) -> str:
+        """이름으로 라벨을 찾고, 없으면 만든다."""
+        if name in self._labels:
+            return self._labels[name]
+        payload = await self._request("GET", "/labels")
+        for label in payload.get("labels", []):
+            if label.get("name") == name and label.get("id"):
+                self._labels[name] = str(label["id"])
+                return self._labels[name]
+        created = await self._request(
+            "POST",
+            "/labels",
+            json={"name": name, "labelListVisibility": "labelShow", "messageListVisibility": "show"},
+        )
+        self._labels[name] = str(created.get("id", ""))
+        logger.info("Gmail 보관함을 만들었습니다")
+        return self._labels[name]
 
     async def create_draft(self, thread_id: str, to: str, subject: str, body: str) -> str:
         """답장 초안을 임시보관함에 저장한다. 발송은 하지 않는다."""

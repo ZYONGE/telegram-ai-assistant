@@ -16,6 +16,8 @@ logger = logging.getLogger(__name__)
 
 # 되돌리기 버튼이 가리키는 날 (콜백 데이터에 들어간다)
 UNDO_PREFIX = "undo:mail"
+# 아침 목록에 넣는 메일. 사람이 보낸 것과 분류하지 못한 것 (정리한 메일은 저녁 정리 내역에 나온다)
+MORNING_KINDS = ("other", "person", "school", "professor", "company")
 
 
 def day_bounds(now: datetime) -> tuple[datetime, datetime]:
@@ -58,7 +60,7 @@ class MailService:
         return await self._cleanup.since(start)
 
     async def undo_cleanup(self, day_start: datetime) -> tuple[int, int]:
-        """그날 휴지통으로 보낸 메일을 되돌린다. (되돌린 수, 실패한 수)"""
+        """그날 휴지통·스팸함·보관함으로 옮긴 메일을 받은편지함으로 되돌린다. (되돌린 수, 실패한 수)"""
         now = self._clock()
         restored = failed = 0
         for record in await self._cleanup.since(day_start):
@@ -67,7 +69,7 @@ class MailService:
                 failed += 1
                 continue
             try:
-                await account.gmail.untrash(record.message_id)
+                await _restore(account.gmail, record)
             except (GoogleApiError, GoogleAuthError) as exc:
                 logger.info("되돌리기 실패: %s", exc)
                 failed += 1
@@ -110,7 +112,17 @@ class MailService:
         return item, draft_id
 
     async def morning_list(self) -> list[tuple[str, str]]:
-        return await self._state.unbriefed("other")
+        return await self._state.unbriefed(*MORNING_KINDS)
 
     async def mark_morning_listed(self) -> None:
-        await self._state.mark_briefed("other")
+        await self._state.mark_briefed(*MORNING_KINDS)
+
+
+async def _restore(gmail, record: CleanupRecord) -> None:
+    """옮긴 곳에서 꺼내 받은편지함으로."""
+    if record.action == "spam":
+        await gmail.unspam(record.message_id)
+    elif record.action == "file":
+        await gmail.unfile(record.message_id, record.label_id)
+    else:
+        await gmail.untrash(record.message_id)

@@ -63,6 +63,13 @@ class MailAction(StrEnum):
     TRASH = "trash"
     TRACK_REPLY = "track_reply"
     SUGGEST_SCHEDULE = "suggest_schedule"
+    # 아래 셋은 사용자 지시(2026-09-21)로 더했다. 규칙 엔진만 실행하고, 저녁 브리핑에서 되돌릴 수 있다.
+    # 스팸함으로 옮긴다. 보호 목록은 휴지통과 똑같이 뺀다.
+    SPAM = "spam"
+    # 영수증 보관함(라벨)으로 옮기고 받은편지함에서 뺀다
+    FILE_RECEIPT = "file_receipt"
+    # 중요 표시
+    MARK_IMPORTANT = "mark_important"
 
 
 @dataclass(frozen=True, slots=True)

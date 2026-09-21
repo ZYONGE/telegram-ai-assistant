@@ -16,6 +16,7 @@ def message(
     sender_name: str = "홍길동",
     thread_id: str = "thread-1",
     received_at: datetime | None = None,
+    labels: frozenset[str] = frozenset(),
 ) -> MailMessage:
     return MailMessage(
         message_id=message_id,
@@ -25,6 +26,7 @@ def message(
         subject=subject,
         snippet=snippet,
         received_at=received_at or kst(9, 18, 9),
+        labels=labels,
     )
 
 
@@ -34,6 +36,12 @@ class FakeGmail:
         self.history_id = history_id
         self.trashed: list[str] = []
         self.untrashed: list[str] = []
+        self.spammed: list[str] = []
+        self.unspammed: list[str] = []
+        self.filed: list[tuple[str, str]] = []
+        self.unfiled: list[tuple[str, str]] = []
+        self.important: list[str] = []
+        self.labels: dict[str, str] = {}
         self.drafts: list[tuple[str, str, str, str]] = []
         self.replied_threads: set[str] = set()
         self.fail_with: Exception | None = None
@@ -62,6 +70,24 @@ class FakeGmail:
         if self.fail_with:
             raise self.fail_with
         self.untrashed.append(message_id)
+
+    async def spam(self, message_id: str) -> None:
+        self.spammed.append(message_id)
+
+    async def unspam(self, message_id: str) -> None:
+        self.unspammed.append(message_id)
+
+    async def mark_important(self, message_id: str) -> None:
+        self.important.append(message_id)
+
+    async def label_id(self, name: str) -> str:
+        return self.labels.setdefault(name, f"Label_{len(self.labels) + 1}")
+
+    async def file_under(self, message_id: str, label_id: str) -> None:
+        self.filed.append((message_id, label_id))
+
+    async def unfile(self, message_id: str, label_id: str) -> None:
+        self.unfiled.append((message_id, label_id))
 
     async def thread_has_reply(self, thread_id: str, after: datetime) -> bool:
         return thread_id in self.replied_threads

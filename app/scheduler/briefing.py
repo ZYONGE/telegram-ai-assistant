@@ -205,9 +205,9 @@ class MailBriefing:
             ]
         else:
             cleaned = await self._service.cleaned_today(now)
-            if cleaned:
-                titles = ", ".join(record.subject[:20] for record in cleaned[:3])
-                items.append(BriefingItem("메일 정리", f"{len(cleaned)}건을 휴지통으로 옮겼습니다: {titles}", 6))
+            for place, records in _by_place(cleaned).items():
+                titles = ", ".join(record.subject[:20] for record in records[:3])
+                items.append(BriefingItem("메일 정리", f"{len(records)}건을 {place}으로 옮겼습니다: {titles}", 6))
 
         overdue = await self._service.overdue_waiting(now)
         self._reminded = overdue
@@ -228,6 +228,16 @@ class MailBriefing:
         if self._reminded:
             await self._service.mark_reminded(self._reminded, now)
             self._reminded = []
+
+
+PLACES = {"trash": "휴지통", "spam": "스팸함", "file": "영수증 보관함"}
+
+
+def _by_place(records: list) -> dict[str, list]:
+    grouped: dict[str, list] = {}
+    for record in records:
+        grouped.setdefault(PLACES.get(record.action, "휴지통"), []).append(record)
+    return grouped
 
 
 class NewsBriefing:

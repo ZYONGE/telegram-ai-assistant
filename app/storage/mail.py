@@ -22,6 +22,10 @@ class CleanupRecord:
     sender: str
     done_at: datetime
     undone_at: datetime | None = None
+    # trash(휴지통) · spam(스팸함) · file(보관함). 되돌릴 때 어디서 꺼낼지 정한다.
+    action: str = "trash"
+    # 보관함으로 옮겼으면 그 라벨
+    label_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,31 +138,43 @@ class MailStateStore:
         await self._conn.commit()
         return cursor.rowcount > 0
 
-    async def unbriefed(self, kind: str) -> list[tuple[str, str]]:
+    async def unbriefed(self, *kinds: str) -> list[tuple[str, str]]:
         """아직 브리핑에 넣지 않은 메일 (계정, 제목)."""
+        marks = ", ".join("?" for _ in kinds)
         async with self._conn.execute(
-            "SELECT account, subject FROM mail_seen WHERE kind = ? AND briefed = 0 ORDER BY seen_at", (kind,)
+            f"SELECT account, subject FROM mail_seen WHERE kind IN ({marks}) AND briefed = 0 ORDER BY seen_at", kinds
         ) as cursor:
             rows = await cursor.fetchall()
         return [(row["account"], row["subject"]) for row in rows]
 
-    async def mark_briefed(self, kind: str) -> None:
-        await self._conn.execute("UPDATE mail_seen SET briefed = 1 WHERE kind = ? AND briefed = 0", (kind,))
+    async def mark_briefed(self, *kinds: str) -> None:
+        marks = ", ".join("?" for _ in kinds)
+        await self._conn.execute(f"UPDATE mail_seen SET briefed = 1 WHERE kind IN ({marks}) AND briefed = 0", kinds)
         await self._conn.commit()
 
 
 class MailCleanupLog:
-    """규칙 엔진이 휴지통으로 보낸 내역. 저녁 브리핑의 [되돌리기]가 이 표를 쓴다."""
+    """규칙 엔진이 휴지통·스팸함·보관함으로 옮긴 내역. 저녁 브리핑의 [되돌리기]가 이 표를 쓴다."""
 
     def __init__(self, db: Database) -> None:
         self._conn = db.conn
 
-    async def record(self, account: str, message_id: str, subject: str, sender: str, now: datetime) -> None:
+    async def record(
+        self,
+        account: str,
+        message_id: str,
+        subject: str,
+        sender: str,
+        now: datetime,
+        action: str = "trash",
+        label_id: str = "",
+    ) -> None:
         await self._conn.execute(
             """
-            INSERT INTO mail_cleanup (account, message_id, subject, sender, done_at) VALUES (?, ?, ?, ?, ?)
+            INSERT INTO mail_cleanup (account, message_id, subject, sender, done_at, action, label_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (account, message_id, subject, sender, to_db_time(now)),
+            (account, message_id, subject, sender, to_db_time(now), action, label_id),
         )
         await self._conn.commit()
 
@@ -266,6 +282,8 @@ def _cleanup(row: aiosqlite.Row) -> CleanupRecord:
         sender=row["sender"],
         done_at=from_db_time(row["done_at"]),
         undone_at=from_db_time(row["undone_at"]),
+        action=row["action"],
+        label_id=row["label_id"],
     )
 
 

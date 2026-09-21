@@ -229,6 +229,12 @@ MIGRATIONS: list[str] = [
     ALTER TABLE eclass_items ADD COLUMN source TEXT NOT NULL DEFAULT '';
     CREATE INDEX idx_eclass_posted ON eclass_items (posted_at);
     """,
+    """
+    -- 메일 정리가 휴지통 말고도 스팸함·영수증 보관함으로 옮긴다 (사용자 지시 2026-09-21).
+    -- 되돌릴 때 어디서 꺼낼지 알아야 한다.
+    ALTER TABLE mail_cleanup ADD COLUMN action TEXT NOT NULL DEFAULT 'trash';
+    ALTER TABLE mail_cleanup ADD COLUMN label_id TEXT NOT NULL DEFAULT '';
+    """,
 ]
 
 

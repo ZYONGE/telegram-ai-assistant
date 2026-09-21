@@ -9,6 +9,7 @@ from logging.handlers import RotatingFileHandler
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
+from urllib.parse import urlsplit
 
 import httpx
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -29,6 +30,7 @@ from app.collectors.eclass.collector import EclassCollector
 from app.collectors.eclass.scope import ScopeStore, ensure_scope
 from app.collectors.eclass.sources import build_sources
 from app.collectors.mail import MailCollector
+from app.mail.rules import AutoPolicy
 from app.collectors.weather import KmaWeather
 from app.channels.telegram_bot import SERVICES_KEY, ChatHandlers, ChatServices
 from app.core.clock import KST, to_kst, utc_now
@@ -184,13 +186,16 @@ async def create_runtime(settings: Settings, bot: Bot, llm: LLM | None = None) -
                 settings.eclass.catalog_file, scope, eclass_items, settings.eclass.urgent_words
             )
         )
+    school = school_domains(settings)
     mail_collector = MailCollector(
         google,
         mail_rules,
         mail_state,
         mail_cleanup,
         waiting_replies,
-        frozenset(settings.mail.protected_domains),
+        frozenset(settings.mail.protected_domains) | school,
+        auto=AutoPolicy(settings.mail.auto, school, settings.mail.corporate_to_spam),
+        receipt_label=settings.mail.receipt_label,
     )
     ingestor = Ingestor(todos, dispatcher)
     backup = BackupService(db, settings.storage.db_path.parent, settings.backup)
@@ -204,6 +209,18 @@ async def create_runtime(settings: Settings, bot: Bot, llm: LLM | None = None) -
 
     services = ChatServices(assistant, registry, conversation, location=location, mail=mail)
     return Runtime(db, scheduler, llm, services, http)
+
+
+def school_domains(settings: Settings) -> frozenset[str]:
+    """학교 메일 도메인. 설정에 없으면 eClass 주소에서 짐작한다 (eclass.학교.ac.kr → 학교.ac.kr).
+
+    학교를 특정하는 값이라 config.toml에 적지 않는다. eClass 주소는 이미 private/local.toml에 있다.
+    """
+    if settings.mail.school_domains:
+        return frozenset(settings.mail.school_domains)
+    host = (urlsplit(settings.eclass.eclass_url).hostname or "").lower()
+    parts = host.split(".")
+    return frozenset({".".join(parts[1:])}) if len(parts) >= 3 else frozenset()
 
 
 def _style_reader(path) -> Callable[[], str]:

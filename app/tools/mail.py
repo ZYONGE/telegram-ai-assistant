@@ -61,12 +61,14 @@ def mail_tools(
 ) -> list:
     async def list_rules(args: Mapping[str, Any]) -> ToolResult:
         found = await rules.list_all()
-        if not found:
-            return ToolResult(
-                "등록된 메일 유형이 없습니다. 지금은 모든 메일이 아침 브리핑 목록에만 들어갑니다. "
-                f"유형 종류: {', '.join(f'{key}({KINDS[key].label})' for key in SELECTABLE)}"
-            )
-        return ToolResult("\n".join(format_rule(rule) for rule in found))
+        lines = [format_rule(rule) for rule in found] or ["등록된 메일 유형이 없습니다."]
+        lines.append(
+            "등록한 규칙에 맞지 않는 메일은 기본 분류를 따릅니다: 개인 주소는 바로 알림, 학교 주소는 알림과 중요 표시, "
+            "결제 확인은 영수증 보관함, 보안 알림·광고는 휴지통, 그 밖의 기업 주소는 스팸함(설정에 따라). "
+            "인증번호·초대 메일은 건드리지 않습니다."
+        )
+        lines.append(f"등록할 수 있는 유형: {', '.join(f'{key}({KINDS[key].label})' for key in SELECTABLE)}")
+        return ToolResult("\n".join(lines))
 
     async def list_waiting(args: Mapping[str, Any]) -> ToolResult:
         items = await service.waiting_items()

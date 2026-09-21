@@ -93,7 +93,8 @@ async def test_professor_mail_is_notified_and_tracked(stores):
     assert gmail.trashed == []
 
 
-async def test_payment_mail_is_trashed_and_logged(stores):
+async def test_payment_mail_is_filed_as_a_receipt_without_an_alert(stores):
+    """결제 확인은 알리지 않고 영수증 보관함에 모은다 (사용자 지시 2026-09-21)."""
     await seed_rules(stores)
     gmail = FakeGmail([message(message_id="m-2", sender="card@bank.example", subject="9월 결제 안내")])
     accounts = FakeAccounts(FakeAccount("개인", gmail, default=True))
@@ -101,10 +102,10 @@ async def test_payment_mail_is_trashed_and_logged(stores):
 
     events = await collector(accounts, stores).collect()
 
-    assert gmail.trashed == ["m-2"]
-    assert "휴지통으로 옮겼습니다." in events[0].body
+    assert events == [] and gmail.trashed == []
+    assert gmail.filed == [("m-2", "Label_1")] and gmail.labels == {"Receipt": "Label_1"}
     cleaned = await stores["cleanup"].since(kst(9, 18, 0))
-    assert [(record.account, record.message_id) for record in cleaned] == [("개인", "m-2")]
+    assert [(record.message_id, record.action, record.label_id) for record in cleaned] == [("m-2", "file", "Label_1")]
 
 
 async def test_ad_mail_is_cleaned_without_an_alert(stores):
@@ -157,10 +158,10 @@ async def test_every_connected_account_is_checked(stores):
 
     events = await collector(accounts, stores).collect()
 
-    assert len(events) == 2
+    assert len(events) == 1
     # 계정이 둘 이상이면 알림에 계정 이름을 붙인다
-    assert all(event.title.startswith("[") for event in events)
-    assert personal.trashed == ["p-1"] and school.trashed == []
+    assert events[0].title.startswith("[학교]")
+    assert [item for item, _label in personal.filed] == ["p-1"] and school.filed == []
 
 
 async def test_one_failing_account_is_reported_but_others_continue(stores):
@@ -206,8 +207,8 @@ def test_alert_text_marks_outside_content_and_actions():
 
     verdict = Engine((), frozenset()).classify(message())
     title, body = alert_text(message(), verdict, "개인", show_account=True)
-    assert title.startswith("[개인] 그 외: 홍길동")
-    assert body.splitlines()[0] == "면담 일정"
+    assert title.startswith("[개인] 그 외: 홍길동 <prof@example.ac.kr>")
+    assert body.splitlines()[0] == "제목: 면담 일정"
 
 
 def test_engine_without_rules_sends_everything_to_the_morning_list():

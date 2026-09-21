@@ -83,6 +83,19 @@ off_words = ["FAQ", "설문", "소모임", "소개", "안내", "도움말", "투
 # 수집 간격(분). 0이면 메일 수집을 하지 않는다.
 poll_minutes = 10
 
+# 등록한 규칙에 맞지 않는 메일을 나누는 기본 분류 (사용자 지시 2026-09-21, app/mail/rules.py AutoPolicy).
+# 개인 주소(gmail·naver 등) → 바로 알림 · 학교 주소 → 바로 알림 + 중요 표시 · 결제 확인 → 영수증 보관함
+# 보안 알림·Gmail 프로모션 → 휴지통 · 그 밖의 기업 주소 → 스팸함 (아래 corporate_to_spam)
+# 인증번호·초대 메일은 건드리지 않는다. 개인·학교 주소와 지원 기업·교수님으로 등록한 발신자는 옮기지 않는다.
+# 옮긴 메일은 저녁 브리핑의 [메일 정리 되돌리기]로 받은편지함에 돌려놓을 수 있다.
+# 학교 도메인은 eClass 주소에서 짐작한다. 다르면 private/local.toml의 [mail] school_domains에 적는다.
+[mail.auto]
+enabled = true
+receipt_label = "Receipt"
+# Gmail은 스팸함으로 옮긴 발신자를 배워 다음부터 스스로 스팸 처리할 수 있다.
+# 지원한 회사는 "지원 기업"으로 등록해 두어야 스팸함에 가지 않는다.
+corporate_to_spam = true
+
 # 날씨 (기상청 단기예보). 키는 private/.env의 WEATHER_API_KEY에 둔다.
 # 기준 좌표는 (1) 텔레그램으로 보낸 최근 위치, (2) private/local.toml에 적어 둔 동네 순으로 고른다.
 # 좌표는 개인정보라 이 파일에 적지 않는다. 키가 없으면 날씨 기능만 꺼진다.
