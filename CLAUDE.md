@@ -44,14 +44,16 @@
 | 저장소 | 구조화 데이터는 SQLite, 장기 기억만 마크다운 파일 |
 | 스케줄러 | APScheduler + SQLite 작업 저장 (재시작 후에도 예약 유지). 작업 원본은 `scheduled_tasks` 표, APScheduler는 메모리에서 시각만 계산 (`docs/adr/0002`) |
 | 외부 연동 | Google Calendar·Gmail API (계정 여러 개, OAuth 직접 구현, `docs/adr/0006`), 기상청 단기예보 API, 웹 검색은 Gemini의 Google 검색 그라운딩 (`docs/adr/0005`) |
-| eClass 수집 | Python Playwright(async) + BeautifulSoup |
+| eClass 수집 | **httpx + BeautifulSoup 우선 검토** (순수 HTTP 로그인 검증 중, `docs/tasks.md` T-21·T-22). 안 되면 Python Playwright(async) + BeautifulSoup 유지 (`docs/adr/0008`) |
 | 시간 | 저장은 UTC, 판단·표시는 `Asia/Seoul` |
-| 배포 | Docker Compose → Oracle Cloud Always Free A1 (Ubuntu 24.04, **arm64**) |
-| 개발 | 윈도우 데스크톱·맥북에서 개발 → GitHub → 서버에서 pull 후 재빌드 |
+| 배포 | **임시: 맥북에어 M1 (8GB, macOS) — 네이티브 venv + launchd LaunchDaemon(`KeepAlive`)**. Docker Desktop은 쓰지 않는다 (`docs/adr/0008`). Oracle Cloud A1(Docker Compose, Ubuntu 24.04 arm64)은 인스턴스를 확보하면 옮긴다 (`deploy/README.md`) |
+| 원격 관리 | SSH + Tailscale. 포트를 밖에 열지 않는다 |
+| 개발 | 윈도우 데스크톱·맥북에서 개발 → GitHub → 서버에서 pull 후 재시작. **개발 맥북과 서버 맥북에어는 다른 기기다** |
 
 - 수집기 실패는 예외로 죽지 말고 `Event(kind="collector_failed")`로 보고한다.
 - 도구 이름과 설명은 모델이 판단하기 쉽게 명확하게 쓴다.
 - Docker 이미지와 의존성은 arm64 지원 여부를 확인한다.
+- **서버는 8GB 맥북이다. 메모리 상주량을 낮게 유지한다.** 스왑이 생기면 교체할 수 없는 SSD의 수명을 쓴다. 무거운 의존성이나 상시 루프를 들이지 않고, 주기 작업은 스케줄로 돌리며 조용한 시간에는 건너뛴다.
 
 ## 4. 디렉토리 구조
 
@@ -75,7 +77,7 @@ assistant/
 ├─ docs/             # 설계 문서, ADR, 레퍼런스 메모
 ├─ refs/             # 참고 오픈소스 클론 (git 제외, 읽기 전용)
 ├─ tests/
-└─ deploy/           # Docker, 서버 설정
+└─ deploy/           # 서버 설정 (macos/: 맥북 임시 서버의 launchd, 나머지: OCI A1용 Docker)
 ```
 
 두 가지 흐름으로 설계한다.
@@ -225,13 +227,16 @@ assistant/
 | 5 | Google 연동: 캘린더, Gmail 요약·규칙·답변 대기·되돌리기 | 규칙별 동작 테스트 통과 |
 | 6 | eClass 수집기: 라이선스 확인 → SSO 로그인 → 과제·공지 → 마감 변경 감지 → 학사일정 | 실패 처리 포함 테스트 통과 |
 | 7 | 감시 기능: 인턴 지원 관리, 채용 공고 감시, 교환학생 공지 | 각 기능 테스트 통과 (**후순위: 8단계 뒤로 미룸**) |
-| 8 | 운영: OCI 배포, 야간 백업, 수집 실패 알림, 로그 | 서버에서 24시간 동작 |
+| 8 | 운영: 맥북에어 임시 서버 배포(추후 OCI A1 이전), 야간 백업, 수집 실패 알림, 로그 | 서버에서 24시간 동작 |
 
 `prompts/system_prompt.md`는 v0.8이다 (호칭은 `{honorific}` 자리표시). 기능이 늘 때마다 "할 수 있는 일"과 "실행과 확인" 절을 갱신한다.
 
 ## 10. 진행 상태
 
-- 현재 단계: **6 완료 (2026-09-20). 다음은 8단계(운영·배포)**. 7단계(감시 기능)는 후순위다 — 상시 운영이 된 뒤에 붙이는 것이 맞다.
+- 현재 단계: **8 진행 중 (2026-09-21)**. 6단계는 완료(2026-09-20). 8단계는 백업·실패 재알림·로그까지 끝났다.
+  **호스팅을 바꿨다**: Oracle Cloud A1 생성이 용량 부족으로 계속 실패해 보류하고, 맥북에어 M1(8GB)을 임시 서버로 쓴다 (ADR 0008). 도커 경로(T-13·T-14)는 A1을 확보할 때까지 보류.
+  **지금 할 일은 eClass 로그인이 순수 HTTP 요청만으로 되는지 검증하는 것이다 (T-21·T-22).** 이 결과에 따라 서버 부하 설계가 갈린다.
+  7단계(감시 기능)는 후순위다 — 상시 운영이 된 뒤에 붙이는 것이 맞다.
   eClass는 할 일·공지·쪽지·강의자료·강의계획서를 모으고, 휴강·시험 변경을 즉시 알린다. 무엇을 가져올지는 화면을 훑어 스스로 정한다 (ADR 0007).
   학사일정은 eClass에 자료가 없어 학교 포털을 따로 봐야 한다 (7단계와 함께).
 - **작업을 시작하기 전에 `docs/tasks.md`의 맨 위 `대기` 항목을 본다.** 다음에 할 일은 그 문서 한 곳에만 있다. 항목을 끝내면 상태를 바꾸고, 새로 생긴 할 일도 거기에 적는다.

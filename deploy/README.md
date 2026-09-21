@@ -1,5 +1,8 @@
 # 서버 배포
 
+> **보류 (2026-09-21).** Oracle Cloud A1 인스턴스가 용량 부족으로 생성되지 않아, 지금은 맥북에어 M1을 임시 서버로 쓴다
+> (`docs/adr/0008-macbook-temporary-server.md`, `docs/tasks.md` T-24~T-28). 이 문서는 A1을 확보해 옮길 때 쓴다.
+
 Oracle Cloud A1(arm64, Ubuntu 24.04)에서 비서를 24시간 돌린다.
 
 > 개인 파일(`private/`)은 이미지에 들어가지 않는다. 볼륨으로만 붙는다 (CLAUDE.md 절대 규칙 12).
