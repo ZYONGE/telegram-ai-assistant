@@ -165,6 +165,7 @@ tail -f private/logs/assistant.log
 | 재시작 | `sudo launchctl kickstart -k system/com.assistant.bot` |
 | 멈추기 | `sudo launchctl unload /Library/LaunchDaemons/com.assistant.bot.plist` |
 | 새 코드 반영 | `git pull && uv sync --no-dev && sudo launchctl kickstart -k system/com.assistant.bot` |
+| 재시작 (sudo 없이, 원격) | `kill -9 $(pgrep -f "python -m app.main")` — 비정상 종료로 보고 launchd가 몇 초 안에 다시 띄운다 (2026-09-22 확인). `kill`(SIGTERM)은 정상 종료라 다시 뜨지 않는다. 조용한 시간처럼 한가할 때 한다 |
 
 ### 3-5. 되돌리기
 
