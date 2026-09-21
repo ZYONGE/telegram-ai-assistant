@@ -324,3 +324,21 @@ def test_a_lower_umbrella_line_catches_light_rain():
     drizzle = replace(day, slots=(SlotForecast("점심", 20.0, "흐림", "", 40),))
     assert "우산" not in drizzle.clothing()
     assert "우산" in replace(drizzle, umbrella_chance=30).clothing()
+
+
+async def test_the_day_after_tomorrow_can_be_asked():
+    from app.tools.weather import weather_tools
+
+    class Weather:
+        def __init__(self):
+            self.asked = []
+
+        async def forecast(self, now, days_ahead):
+            self.asked.append(days_ahead)
+            return build_forecast(SAMPLE, kst(9, 18, 7).date())
+
+    weather = Weather()
+    tool = weather_tools(weather, lambda: kst(9, 18, 7))[0]
+    assert "모레" in tool.spec.input_schema["properties"]["day"]["enum"]
+    result = await tool.run({"day": "모레"})
+    assert weather.asked == [2] and result.content.startswith("모레 날씨")

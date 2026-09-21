@@ -247,3 +247,68 @@ async def test_tools_exist_before_the_account_is_connected():
     assert set(tools) == {"list_events", "find_free_time", "add_event", "update_event", "delete_event"}
     result = await tools["list_events"].run({})
     assert result.is_error is True and result.content == NOT_CONNECTED
+
+
+# --- 종일·메모·반복·알림 (가능한 작업은 모두, 2026-09-22) ---
+
+
+async def test_add_event_with_repeat_reminders_and_memo(tmp_path):
+    api = FakeCalendarApi([[], []])
+    tools, http = build(tmp_path, api)
+    args = {
+        "title": "스터디",
+        "start": "2026-09-18T19:00",
+        "description": "3장까지 읽어 오기",
+        "repeat": "매주",
+        "repeat_until": "2026-12-18",
+        "remind_minutes": [60, 10],
+    }
+    async with http:
+        summary = await tools["add_event"].describe(args)
+        await tools["add_event"].run(args)
+    assert "매주 반복 (12/18까지)" in summary and "알림 10분 전, 60분 전" in summary and "메모: 3장까지" in summary
+    _method, body = api.writes[0]
+    assert body["recurrence"] == ["RRULE:FREQ=WEEKLY;UNTIL=20261218T145959Z"]
+    assert body["reminders"] == {
+        "useDefault": False,
+        "overrides": [{"method": "popup", "minutes": 10}, {"method": "popup", "minutes": 60}],
+    }
+    assert body["description"] == "3장까지 읽어 오기"
+
+
+async def test_add_all_day_event_over_several_days(tmp_path):
+    api = FakeCalendarApi([[], []])
+    tools, http = build(tmp_path, api)
+    args = {"title": "제주 여행", "start": "2026-10-03", "end": "2026-10-05", "all_day": True}
+    async with http:
+        summary = await tools["add_event"].describe(args)
+        await tools["add_event"].run(args)
+    assert "10/03~10/05 종일 제주 여행" in summary
+    _method, body = api.writes[0]
+    # 종일 일정의 끝은 다음 날로 넣는다
+    assert body["start"] == {"date": "2026-10-03"} and body["end"] == {"date": "2026-10-06"}
+
+
+async def test_bad_repeat_and_reminders_are_rejected(tmp_path):
+    tools, http = build(tmp_path, FakeCalendarApi([[], []]))
+    async with http:
+        with pytest.raises(ToolInputError):
+            await tools["add_event"].describe({"title": "a", "start": "2026-09-18T19:00", "repeat": "격주"})
+        with pytest.raises(ToolInputError):
+            await tools["add_event"].describe({"title": "a", "start": "2026-09-18T19:00", "remind_minutes": ["열"]})
+
+
+async def test_listing_shows_memo_and_repeat(tmp_path):
+    item = event("스터디", "19:00", "21:00") | {"description": "3장까지", "recurringEventId": "base-1"}
+    tools, http = build(tmp_path, FakeCalendarApi([[item], []]))
+    async with http:
+        result = await tools["list_events"].run({"account": "개인"})
+    assert result.content == "[개인] 19:00~21:00 스터디 · 반복 일정 · 메모: 3장까지"
+
+
+async def test_memo_can_be_changed(tmp_path):
+    api = FakeCalendarApi([[event("스터디", "19:00", "21:00")], []])
+    tools, http = build(tmp_path, api)
+    async with http:
+        await tools["update_event"].run({"day": "오늘", "title": "스터디", "new_description": "4장까지"})
+    assert api.writes[0] == ("PATCH", {"description": "4장까지"})

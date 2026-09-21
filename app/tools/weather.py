@@ -9,7 +9,8 @@ from app.core.clock import utc_now
 from app.core.interfaces import ToolResult
 from app.tools.common import SimpleTool, optional_str, spec
 
-DAYS = {"오늘": 0, "today": 0, "내일": 1, "tomorrow": 1}
+DAYS = {"오늘": 0, "today": 0, "내일": 1, "tomorrow": 1, "모레": 2}
+LABELS = {0: "오늘", 1: "내일", 2: "모레"}
 
 
 def weather_tools(weather: KmaWeather, clock: Callable[[], datetime] = utc_now) -> list:
@@ -20,7 +21,7 @@ def weather_tools(weather: KmaWeather, clock: Callable[[], datetime] = utc_now) 
             forecast = await weather.forecast(clock(), days_ahead)
         except WeatherUnavailable as exc:
             return ToolResult(str(exc), is_error=True)
-        label = "내일" if days_ahead else "오늘"
+        label = LABELS[days_ahead]
         # 옷차림 기본안은 코드가 정한다. 모델은 일정·상황을 반영해 문장만 다듬는다.
         return ToolResult(f"{label} 날씨\n{forecast.render()}\n{forecast.clothing()}")
 
@@ -28,9 +29,9 @@ def weather_tools(weather: KmaWeather, clock: Callable[[], datetime] = utc_now) 
         SimpleTool(
             spec(
                 "get_weather",
-                "오늘이나 내일의 아침·점심·저녁 기온, 하늘 상태, 강수확률과 옷차림 기본안을 가져온다. "
+                "오늘·내일·모레의 아침·점심·저녁 기온, 하늘 상태, 강수확률과 옷차림 기본안을 가져온다. "
                 "날씨나 옷차림을 물으면 사용한다. 결과의 옷차림 기본안은 그대로 쓰되 일정이나 상황에 맞게 문장만 다듬는다.",
-                {"day": {"type": "string", "enum": ["오늘", "내일"], "description": "조회할 날 (기본값 오늘)"}},
+                {"day": {"type": "string", "enum": ["오늘", "내일", "모레"], "description": "조회할 날 (기본값 오늘)"}},
                 [],
             ),
             get_weather,

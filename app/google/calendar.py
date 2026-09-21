@@ -6,7 +6,7 @@
 
 import logging
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 
 import httpx
 
@@ -30,6 +30,10 @@ class CalendarEvent:
     location: str = ""
     # 어느 계정의 일정인지 (여러 계정을 함께 볼 때 표시)
     account: str = ""
+    # 메모. 목록에서 물으면 보여 주고, 브리핑에는 넣지 않는다.
+    description: str = ""
+    # 반복 일정이면 True (한 번 한 번이 따로 나온다)
+    recurring: bool = False
 
     def render(self, with_date: bool = False, with_account: bool = False) -> str:
         local_start, local_end = to_kst(self.start), to_kst(self.end)
@@ -70,6 +74,8 @@ def parse_event(item: dict) -> CalendarEvent | None:
         end=finishes or begins,
         all_day=all_day,
         location=(item.get("location") or "").strip(),
+        description=(item.get("description") or "").strip(),
+        recurring=bool(item.get("recurringEventId")),
     )
 
 
@@ -162,8 +168,13 @@ class CalendarClient:
         location: str = "",
         description: str = "",
         all_day: bool = False,
+        recurrence: tuple[str, ...] = (),
+        reminders: tuple[int, ...] | None = None,
     ) -> CalendarEvent:
-        body = _body(title, start, end, location=location, description=description, all_day=all_day)
+        body = _body(
+            title, start, end, location=location, description=description, all_day=all_day,
+            recurrence=recurrence, reminders=reminders,
+        )
         payload = await self._request("POST", f"/calendars/{self._calendar_id}/events", json=body)
         created = parse_event(payload)
         if created is None:
@@ -178,12 +189,15 @@ class CalendarClient:
         start: datetime | None = None,
         end: datetime | None = None,
         location: str | None = None,
+        description: str | None = None,
     ) -> CalendarEvent:
         body: dict = {}
         if title is not None:
             body["summary"] = title
         if location is not None:
             body["location"] = location
+        if description is not None:
+            body["description"] = description
         if start is not None:
             body["start"] = {"dateTime": start.isoformat(), "timeZone": "Asia/Seoul"}
         if end is not None:
@@ -243,6 +257,8 @@ def _body(
     location: str = "",
     description: str = "",
     all_day: bool = False,
+    recurrence: tuple[str, ...] = (),
+    reminders: tuple[int, ...] | None = None,
 ) -> dict:
     if all_day:
         # 종일 일정의 종료일은 다음 날로 넣어야 한다
@@ -260,4 +276,23 @@ def _body(
         body["location"] = location
     if description:
         body["description"] = description
+    if recurrence:
+        body["recurrence"] = list(recurrence)
+    if reminders is not None:
+        # 캘린더 기본 알림 대신 정한 시점에 휴대폰 알림을 띄운다
+        body["reminders"] = {"useDefault": False, "overrides": [{"method": "popup", "minutes": m} for m in reminders]}
     return body
+
+
+REPEATS = {"매일": "DAILY", "매주": "WEEKLY", "매월": "MONTHLY", "매년": "YEARLY"}
+
+
+def repeat_rule(repeat: str, until: date | None = None, count: int | None = None) -> str:
+    """'매주' + 끝나는 날/횟수 → RRULE. 끝을 정하지 않으면 계속 반복한다."""
+    rule = f"RRULE:FREQ={REPEATS[repeat]}"
+    if until is not None:
+        stop = datetime.combine(until, time(23, 59, 59), tzinfo=KST).astimezone(UTC)
+        rule += f";UNTIL={stop:%Y%m%dT%H%M%SZ}"
+    elif count:
+        rule += f";COUNT={count}"
+    return rule
