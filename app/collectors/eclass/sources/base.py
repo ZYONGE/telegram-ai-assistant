@@ -25,6 +25,9 @@ class SourceResult:
     items: list[EclassItem] = field(default_factory=list)
     # 형태가 달라 한 줄도 읽지 못했다. 사이트 구조가 바뀐 것으로 본다.
     suspicious: bool = False
+    # 항목이 바뀌었는지와 상관없이 올릴 이벤트. 알릴 소식이 아니라 상태를 맞추는 신호다
+    # (과제 제출이 확인되면 할 일을 닫는다).
+    events: list[Event] = field(default_factory=list)
 
 
 class EclassSource(Protocol):

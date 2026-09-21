@@ -33,6 +33,8 @@ class EventKind(StrEnum):
     JOB_POSTING = "job_posting"
     BRIEFING = "briefing"
     COLLECTOR_FAILED = "collector_failed"
+    # 제출이 확인된 과제. 알릴 소식이 아니라 할 일을 닫는 신호다 (게이트를 거치지 않는다).
+    SUBMITTED = "submitted"
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

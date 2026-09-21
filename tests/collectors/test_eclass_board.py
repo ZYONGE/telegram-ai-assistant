@@ -319,7 +319,7 @@ def test_a_course_screen_is_marked_even_without_a_course_key(tmp_path):
         )
     }
     board = build_sources(path, scope)[1]
-    assert board.per_course is True and board.interval == timedelta(hours=12)
+    assert board.per_course is True and board.interval == timedelta(hours=3)
 
 
 def test_what_we_only_store_is_looked_at_less_often(tmp_path):

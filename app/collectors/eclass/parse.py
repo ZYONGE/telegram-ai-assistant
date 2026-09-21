@@ -36,6 +36,10 @@ _VIEW_PAGE = re.compile(r"viewPage\(\s*['\"](\d+)")
 _IMPT_SEQ = re.compile(r'impt_seq="(\d+)"')
 # 목록 줄에서 글을 여는 주소 (본문을 읽어 올 때 쓴다)
 _LINK = re.compile(r"['\"](/ilos/[\w./-]*_view[\w./-]*\.acl\?[^'\"]*)['\"]")
+# 과제 게시판의 제출 칸 (2026-09-21 실제 확인: 15과목에서 "제출" 9건, "미제출" 3건)
+SUBMIT_HEAD = "제출"
+SUBMITTED_MARKS = frozenset({"제출", "제출완료", "제출 완료"})
+NOT_SUBMITTED_MARKS = frozenset({"미제출"})
 # 연도를 채울 때, 이만큼 앞선 날짜까지는 올해로 본다
 _FUTURE_SLACK = timedelta(days=30)
 
@@ -53,7 +57,12 @@ class TodoRow:
 
     @property
     def item_id(self) -> str:
-        return f"eclass:{self.category}:{self.kjkey}:{self.seq}"
+        return todo_item_id(self.category, self.kjkey, self.seq)
+
+
+def todo_item_id(category: str, kjkey: str, seq: str) -> str:
+    """할 일 항목의 이름. 과제 게시판의 글번호(RT_SEQ)가 할 일의 번호와 같아 이것으로 이어진다."""
+    return f"eclass:{category}:{kjkey}:{seq}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +83,8 @@ class ListRow:
     author: str = ""
     # 글을 여는 주소. 본문을 읽어 올 때 쓴다 (목록 줄의 onclick에 들어 있다).
     view_url: str = ""
+    # 과제 게시판의 '제출' 칸. 모르면 None (다른 게시판에는 그 칸이 없다).
+    submitted: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -264,6 +275,8 @@ def parse_list(html: str, now: datetime | None = None) -> ParseResult:
     rows: list[ListRow] = []
     skipped = 0
     seen: set[str] = set()
+    heads = [_text(node) for node in soup.select("tr th")]
+    submit_col = heads.index(SUBMIT_HEAD) if SUBMIT_HEAD in heads else None
     for row in soup.select("tr"):
         cells = row.select("td")
         if len(cells) < 2:
@@ -290,9 +303,25 @@ def parse_list(html: str, now: datetime | None = None) -> ParseResult:
                 posted_at=posted_at,
                 author=_text(row.select_one(".subjt_bottom span")),
                 view_url=link.group(1).replace("&amp;", "&") if link else "",
+                submitted=_submission(cells[submit_col]) if submit_col is not None and submit_col < len(cells) else None,
             )
         )
     return ParseResult(rows, skipped)
+
+
+def _submission(cell) -> bool | None:
+    """'제출' 칸을 읽는다. 표시는 글자가 아니라 그림의 alt에 있다.
+
+    **정확히 일치로 본다.** "미제출"에도 "제출"이라는 글자가 들어 있어서,
+    포함 여부로 보면 미제출까지 전부 제출로 읽힌다.
+    """
+    image = cell.select_one("img")
+    mark = str(image.get("alt") or image.get("title") or "").strip() if image else _text(cell)
+    if mark in SUBMITTED_MARKS:
+        return True
+    if mark in NOT_SUBMITTED_MARKS:
+        return False
+    return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -344,11 +373,59 @@ def parse_syllabus(html: str) -> list[tuple[str, str]]:
     학기에 한 번 바뀌는 정적 문서다. 평가 방식·교재·강의시간을 비서가 참고한다.
     교수 연락처가 들어 있으므로 저장한 뒤 로그에 남기지 않는다.
     """
+    return _pairs(BeautifulSoup(html, "html.parser").select("table.bbsview tr"))
+
+
+@dataclass(frozen=True, slots=True)
+class Assignment:
+    """과제 상세 화면. 무엇을 내야 하는지와 첨부 파일 이름."""
+
+    description: str = ""
+    # 파일 이름과 크기만. **내려받지 않는다** (탐색기와 같은 약속).
+    attachments: list[str] = field(default_factory=list)
+    method: str = ""  # 제출방식 (온라인·오프라인)
+    late: str = ""  # 지각제출 (허용·불허)
+
+    def summary(self) -> str:
+        """저장하고 보여 줄 한 덩어리 글."""
+        lines = [self.description] if self.description else []
+        if self.attachments:
+            lines.append("첨부: " + ", ".join(self.attachments))
+        extra = " · ".join(
+            part for part in (f"제출방식 {self.method}" if self.method else "", f"지각제출 {self.late}" if self.late else "") if part
+        )
+        if extra:
+            lines.append(extra)
+        return "\n".join(lines)
+
+
+def parse_assignment(html: str) -> Assignment:
+    """과제 상세 화면을 읽는다. 첨부 링크는 글자만 보고 따라가지 않는다."""
     soup = BeautifulSoup(html, "html.parser")
+    attachments = [
+        re.sub(r"^[-·\s]+", "", _text(link))
+        for link in soup.select('a[href*="efile_download"], a[href*="file_down"]')
+        if _text(link)
+    ]
+    viewer = soup.select_one(".textviewer")
+    description = _text(viewer)
+    # 본문 끝에 "첨부파일(1개) - 이름"이 붙어 온다. 첨부는 따로 모으므로 잘라 낸다.
+    description = re.split(r"첨부파일\s*\(\d+개\)", description)[0].strip()
+
+    info = dict(_pairs(soup.select("table.bbsview tr")))
+    return Assignment(
+        description=description,
+        attachments=attachments,
+        method=info.get("제출방식", ""),
+        late=info.get("지각제출", ""),
+    )
+
+
+def _pairs(rows) -> list[tuple[str, str]]:
+    """한 줄에 이름·내용이 두 쌍씩 들어 있는 표를 편다 (강의계획서·과제 상세가 이 모양이다)."""
     pairs: list[tuple[str, str]] = []
-    for row in soup.select("table.bbsview tr"):
+    for row in rows:
         cells = row.select("th, td")
-        # 한 줄에 이름·내용이 두 쌍씩 들어 있는 표다
         for index in range(0, len(cells) - 1, 2):
             name, value = _text(cells[index]), _text(cells[index + 1])
             if name and value:

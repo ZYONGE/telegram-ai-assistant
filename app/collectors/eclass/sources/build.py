@@ -36,6 +36,11 @@ COURSE_PREFIX = "/ilos/st/course/"
 # 게시판이 아니라 따로 읽어야 하는 화면. 경로에 이 조각이 있으면 전용 소스를 쓴다.
 SPECIAL = {"plan_form": SyllabusSource}
 
+# 제출 칸이 있는 게시판 → (닫을 할 일의 종류, 볼 간격).
+# 과제 게시판은 저장만 하는 화면이지만 제출 여부로 할 일을 닫는다.
+# 제출하고 반나절씩 열려 있으면 마감 임박으로 또 알리게 되므로 자주 본다.
+SUBMISSION_BOARDS = {"report_list": ("과제", timedelta(hours=3))}
+
 # 메뉴 글자를 못 주운 화면의 이름. 알림 문구에 그대로 나오므로 사람이 읽을 말로 둔다.
 FALLBACK_LABELS = {
     "message_received_list_pop": "쪽지",
@@ -106,6 +111,10 @@ def _board(
     urgent_words: tuple[str, ...] = DEFAULT_URGENT_WORDS,
 ) -> BoardSource:
     key = source_key(screen.path)
+    category, interval = next(
+        (rule for mark, rule in SUBMISSION_BOARDS.items() if mark in screen.path),
+        ("", INTERVALS[entry.level]),
+    )
     return BoardSource(
         key=key,
         label=source_label(entry.name, key),
@@ -113,8 +122,9 @@ def _board(
         data_path=screen.data_path,
         level=entry.level,
         per_course=entry.per_course or screen.path.startswith(COURSE_PREFIX),
-        interval=INTERVALS[entry.level],
+        interval=min(interval, INTERVALS[entry.level]) if category else interval,
         priority=PRIORITY[entry.level],
         items=items,
         urgent_words=urgent_words,
+        submission_category=category,
     )

@@ -33,9 +33,22 @@ class Ingestor:
         decisions = []
         for event in events:
             try:
+                if event.kind == EventKind.SUBMITTED:
+                    # 새 소식이 아니라 상태를 맞추는 일이다. 할 일만 닫고 알리지 않는다.
+                    await self._close_submitted(event, now)
+                    continue
                 if event.kind in TODO_KINDS:
                     await self._todos.add_from_event(event, now)
                 decisions.append(await self._dispatcher.publish(event, now))
             except Exception:
                 logger.exception("이벤트 처리 실패: %s", event.ref_id)
         return decisions
+
+    async def _close_submitted(self, event: Event, now: datetime) -> None:
+        """제출이 확인된 과제의 할 일을 완료로 바꾼다. 이미 닫혔거나 없으면 그냥 둔다."""
+        ref = str(event.meta.get("todo_ref", ""))
+        todo = await self._todos.get_by_ref(ref) if ref else None
+        if todo is None or todo.status != "open":
+            return
+        await self._todos.set_status(todo.id, "done", now)
+        logger.info("제출이 확인된 과제 1건을 완료로 바꿨습니다")

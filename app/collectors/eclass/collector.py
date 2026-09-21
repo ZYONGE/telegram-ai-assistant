@@ -193,6 +193,8 @@ class EclassCollector:
                 event = entry.source.event_for(item, change, now)
                 if event is not None:
                     events.append(event)
+            # 항목 변화와 상관없는 신호 (과제 제출 확인). 알리지 않고 할 일만 닫는다.
+            events.extend(entry.result.events)
         # 일부만 실패했다면 수집기는 살아 있다. 실패한 소스만 이름을 붙여 알린다.
         for entry in failed:
             events.append(
