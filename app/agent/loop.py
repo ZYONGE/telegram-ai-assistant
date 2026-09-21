@@ -3,6 +3,8 @@
 - 대화 기록은 SQLite에 추가만 한다. 모델 응답은 제공자 형식 그대로 저장하고 그대로 다시 보낸다.
 - 유휴 시간이 지나거나 기록이 길어지면 가벼운 모델로 요약하고, 요약을 담은 새 대화로 이어 간다 (nanobot 참고, docs/adr/0003).
 - 도구 확인 단계는 ToolRegistry가 적용한다. 모델 제공사별 형식은 app/llm 어댑터가 맡는다 (docs/adr/0004).
+- 도구를 쓰는 요청이면 끝나기 전에 "확인하고 말씀드릴게요" 같은 한 줄을 먼저 보낸다 (사용자 지시 2026-09-21).
+  모델이 도구를 부르며 함께 쓴 문장을 보내고, 없으면 기본 문장을 보낸다. 한 요청에 한 번만.
 """
 
 import asyncio
@@ -10,6 +12,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from app.agent.light import LightModel
@@ -27,6 +30,11 @@ MAX_OUTPUT_TOKENS = 16000
 BLOCKED_REPLY = "그 요청은 도와드리기 어렵습니다."
 TOO_MANY_STEPS_REPLY = "처리할 단계가 너무 많아 여기서 멈췄습니다. 요청을 나눠서 말씀해 주세요."
 INTERRUPTED_RESULT = "이 도구 실행은 중단되어 결과가 없습니다."
+# 도구를 쓰기 시작할 때 먼저 보내는 한 줄. 모델이 쓴 문장이 없을 때만 쓴다.
+DEFAULT_ACK = "확인하고 말씀드릴게요."
+
+# 처리 중에 먼저 보낼 말을 받는 곳 (텔레그램 채널이 채운다)
+Progress = Callable[[str], Awaitable[None]]
 
 
 @dataclass(slots=True)
@@ -53,7 +61,7 @@ class Assistant:
         self._light = light
         self._lock = asyncio.Lock()
 
-    async def reply(self, text: str, now: datetime) -> AssistantReply:
+    async def reply(self, text: str, now: datetime, progress: Progress | None = None) -> AssistantReply:
         async with self._lock:
             if await self._store.count_active() >= self._settings.max_active_messages:
                 await self._try_compact(now)
@@ -66,7 +74,9 @@ class Assistant:
 
             history = [m.content for m in await self._store.active_messages()]
             system = await self._prompt.build(await self._store.summary())
-            return await self._run(system, history, self._registry.definitions(), now, persist=True)
+            return await self._run(
+                system, history, self._registry.definitions(), now, persist=True, progress=progress
+            )
 
     async def run_task(self, instruction: str, now: datetime) -> str:
         """예약 작업 실행. 대화 기록과 분리된 1회성 실행이며, 확인 버튼이 필요한 도구는 주지 않는다."""
@@ -116,9 +126,17 @@ class Assistant:
             await self._store.append("user", self._model.tool_results_turn([(c, failed) for c in calls]), now)
 
     async def _run(
-        self, system: str, history: list[Turn], tools: list[dict[str, Any]], now: datetime, *, persist: bool
+        self,
+        system: str,
+        history: list[Turn],
+        tools: list[dict[str, Any]],
+        now: datetime,
+        *,
+        persist: bool,
+        progress: Progress | None = None,
     ) -> AssistantReply:
         confirmations: list[PendingAction] = []
+        acknowledged = progress is None
         for _ in range(MAX_TOOL_ROUNDS):
             turn = await self._model.generate(system, history, tools, max_tokens=MAX_OUTPUT_TOKENS)
             if turn.content is not None:
@@ -126,6 +144,10 @@ class Assistant:
 
             if turn.finish is not Finish.TOOL_CALLS:
                 return AssistantReply(final_text(turn), confirmations)
+
+            if not acknowledged:
+                acknowledged = True
+                await _send_progress(progress, strip_markdown(turn.text.strip()) or DEFAULT_ACK)
 
             results: list[tuple[ToolCall, ToolResult]] = []
             for call in turn.tool_calls:
@@ -141,6 +163,14 @@ class Assistant:
         history.append(content)
         if persist:
             await self._store.append(role, content, now)
+
+
+async def _send_progress(progress: Progress, text: str) -> None:
+    """먼저 보내는 한 줄. 못 보내도 요청 처리는 계속한다."""
+    try:
+        await progress(text)
+    except Exception:
+        logger.exception("처리 중 안내를 보내지 못했습니다")
 
 
 def final_text(turn: ModelTurn) -> str:

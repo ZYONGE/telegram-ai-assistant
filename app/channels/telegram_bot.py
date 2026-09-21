@@ -145,8 +145,14 @@ class ChatHandlers:
         chat_id = update.effective_chat.id
         notifier = TelegramNotifier(context.bot, chat_id)
         await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+
+        async def progress(text: str) -> None:
+            # 도구를 쓰는 요청이면 끝나기 전에 받았다는 말을 먼저 보낸다 (사용자 지시)
+            await notifier.send(OutgoingMessage(text))
+            await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+
         try:
-            reply = await services.assistant.reply(update.effective_message.text, services.clock())
+            reply = await services.assistant.reply(update.effective_message.text, services.clock(), progress)
         except Exception as exc:
             # 일시적인 모델 장애는 스택 추적 없이 한 줄만 남긴다
             transient = isinstance(exc, TransientLLMError)

@@ -1,21 +1,38 @@
-"""선제 알림의 유일한 발송 경로: 게이트 결정 → 기록 → (즉시 발송이면) 전송."""
+"""선제 알림의 유일한 발송 경로: 게이트 결정 → 기록 → (즉시 발송이면) 문장 다듬기 → 전송.
+
+알림 초안은 코드가 만들고, 보낼 때만 가벼운 모델이 사용자가 정한 말투로 다시 쓴다 (알릴 내용이 있을 때만 모델을 부른다).
+브리핑은 이미 다듬어져 오므로 다시 쓰지 않는다. 다듬기에 실패하면 초안을 그대로 보낸다.
+"""
 
 import logging
+from dataclasses import replace
 from datetime import datetime
+from typing import Protocol
 
 from app.core.clock import format_kst
-from app.core.events import Event
+from app.core.events import Event, EventKind
 from app.core.interfaces import Button, GateAction, GateDecision, NotificationGate, Notifier, OutgoingMessage
 from app.storage.notifications import NotificationLog
 
 logger = logging.getLogger(__name__)
 
 
+class Phraser(Protocol):
+    async def phrase_alert(self, draft: str) -> str: ...
+
+
 class Dispatcher:
-    def __init__(self, gate: NotificationGate, log: NotificationLog, notifier: Notifier) -> None:
+    def __init__(
+        self,
+        gate: NotificationGate,
+        log: NotificationLog,
+        notifier: Notifier,
+        phraser: Phraser | None = None,
+    ) -> None:
         self._gate = gate
         self._log = log
         self._notifier = notifier
+        self._phraser = phraser
 
     async def publish(self, event: Event, now: datetime) -> GateDecision:
         decision = await self._gate.decide(event, now)
@@ -23,9 +40,20 @@ class Dispatcher:
             return decision
         await self._log.save_decision(event, decision, now)
         if decision.action is GateAction.SEND_NOW:
-            await self._notifier.send(render_event(event))
+            await self._notifier.send(await self._message(event))
             await self._log.mark_sent(event.ref_id, now)
         return decision
+
+    async def _message(self, event: Event) -> OutgoingMessage:
+        message = render_event(event)
+        if self._phraser is None or event.kind == EventKind.BRIEFING:
+            return message
+        try:
+            text = (await self._phraser.phrase_alert(message.text)).strip()
+        except Exception:
+            logger.exception("알림 다듬기 실패, 초안을 보냅니다")
+            return message
+        return replace(message, text=text or message.text)
 
     async def release_pending(self, now: datetime) -> int:
         """보류가 풀렸거나 발송에 실패했던 알림을 다시 판단한다. 보낸 건수를 반환한다."""

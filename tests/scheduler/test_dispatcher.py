@@ -2,8 +2,9 @@
 
 from datetime import UTC, datetime
 
+from app.core.events import EventKind
 from app.core.interfaces import GateAction
-from app.scheduler.dispatcher import render_event
+from app.scheduler.dispatcher import Dispatcher, render_event
 from tests.conftest import kst, make_event
 
 
@@ -76,3 +77,52 @@ def test_render_event_shows_due_time_in_kst():
     message = render_event(make_event(title="과제 제출", due_at=due))
     assert message.text == "과제 제출\n마감: 9월 18일(금) 23:59"
     assert "*" not in message.text
+
+
+# --- 사용자가 정한 말투로 다시 쓰기 ---
+
+
+class FakePhraser:
+    def __init__(self, fail: bool = False) -> None:
+        self.drafts: list[str] = []
+        self.fail = fail
+
+    async def phrase_alert(self, draft: str) -> str:
+        self.drafts.append(draft)
+        if self.fail:
+            raise RuntimeError("모델 장애")
+        return "길동님, 휴강 소식이 있어요."
+
+
+def phrased(gate, log, notifier, phraser) -> Dispatcher:
+    return Dispatcher(gate, log, notifier, phraser=phraser)
+
+
+async def test_alerts_are_sent_in_the_users_voice(gate, log, notifier):
+    phraser = FakePhraser()
+    event = make_event("p1", urgent=True, body="9월 23일 휴강", meta={"buttons": [{"label": "확인", "data": "x"}]})
+    await phrased(gate, log, notifier, phraser).publish(event, kst(9, 20, 10))
+
+    assert phraser.drafts == ["휴강 안내\n9월 23일 휴강"]
+    assert notifier.sent[0].text == "길동님, 휴강 소식이 있어요."
+    assert notifier.sent[0].buttons  # 버튼은 그대로
+
+
+async def test_briefings_are_not_rewritten_twice(gate, log, notifier):
+    phraser = FakePhraser()
+    event = make_event("b1", kind=EventKind.BRIEFING, body="아침 브리핑 본문")
+    await phrased(gate, log, notifier, phraser).publish(event, kst(9, 20, 7))
+    assert phraser.drafts == [] and "아침 브리핑 본문" in notifier.sent[0].text
+
+
+async def test_the_draft_goes_out_when_rewriting_fails(gate, log, notifier):
+    event = make_event("p2", urgent=True)
+    await phrased(gate, log, notifier, FakePhraser(fail=True)).publish(event, kst(9, 20, 10))
+    assert notifier.sent[0].text == "휴강 안내"
+
+
+async def test_batched_events_are_not_rewritten(gate, log, notifier):
+    """브리핑으로 미루는 소식은 지금 보내지 않으므로 모델을 부르지 않는다."""
+    phraser = FakePhraser()
+    await phrased(gate, log, notifier, phraser).publish(make_event("p3"), kst(9, 20, 10))
+    assert phraser.drafts == [] and notifier.sent == []

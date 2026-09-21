@@ -22,7 +22,7 @@ from telegram.ext import Application, ApplicationBuilder
 from app.agent.light import LightModel
 from app.agent.loop import Assistant
 from app.agent.memory import MarkdownMemoryStore
-from app.agent.prompt import PromptBuilder, load_identity
+from app.agent.prompt import PromptBuilder, clean_profile, load_identity
 from app.channels.telegram import TelegramNotifier
 from app.collectors.eclass.browse import EclassBrowser
 from app.collectors.eclass.collector import EclassCollector
@@ -107,7 +107,11 @@ async def create_runtime(settings: Settings, bot: Bot, llm: LLM | None = None) -
 
     notifier = TelegramNotifier(bot, settings.telegram.allowed_user_id)
     gate = RuleBasedGate(log, settings.notification)
-    dispatcher = Dispatcher(gate, log, notifier)
+    # 이름·호칭은 git에서 제외된 private/profile.md에서, 말투·보고 방식은 private/instructions.md에서 읽는다
+    honorific = load_identity(settings.storage.profile_path).honorific
+    light = LightModel(llm.light, honorific, style=_style_reader(settings.storage.instructions_path))
+    # 선제 알림은 보낼 때 사용자가 정한 말투로 다시 쓴다
+    dispatcher = Dispatcher(gate, log, notifier, phraser=light)
     scheduler = AsyncIOScheduler(timezone=KST)
     tasks = TaskService(TaskRepository(db), scheduler, dispatcher)
 
@@ -124,9 +128,6 @@ async def create_runtime(settings: Settings, bot: Bot, llm: LLM | None = None) -
     waiting_replies = WaitingReplyStore(db)
     mail = MailService(google, mail_cleanup, waiting_replies, mail_state)
 
-    # 이름·호칭은 git에서 제외된 private/profile.md에서 읽는다
-    honorific = load_identity(settings.storage.profile_path).honorific
-    light = LightModel(llm.light, honorific)
 
     registry = ToolRegistry(PendingActionStore(db))
     eclass_scope = ScopeStore(settings.eclass.scope_file)
@@ -203,6 +204,17 @@ async def create_runtime(settings: Settings, bot: Bot, llm: LLM | None = None) -
 
     services = ChatServices(assistant, registry, conversation, location=location, mail=mail)
     return Runtime(db, scheduler, llm, services, http)
+
+
+def _style_reader(path) -> Callable[[], str]:
+    """지시 파일을 읽어 모델에 넘길 부분만 남긴다. 부를 때마다 읽어 고친 내용이 바로 적용된다."""
+
+    def read() -> str:
+        if path is None or not path.exists():
+            return ""
+        return clean_profile(path.read_text(encoding="utf-8"))
+
+    return read
 
 
 def _add_system_jobs(

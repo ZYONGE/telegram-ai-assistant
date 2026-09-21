@@ -134,7 +134,7 @@ async def test_text_reply_and_confirmation_buttons_are_sent(services, todos):
     action = await request_delete(services, todos)
 
     class Assistant:
-        async def reply(self, text, now):
+        async def reply(self, text, now, progress=None):
             from app.agent.loop import AssistantReply
 
             return AssistantReply("확인 버튼을 보내 드렸습니다.", [action])
@@ -149,7 +149,7 @@ async def test_text_reply_and_confirmation_buttons_are_sent(services, todos):
 
 async def test_assistant_failure_sends_fallback(services):
     class Broken:
-        async def reply(self, text, now):
+        async def reply(self, text, now, progress=None):
             raise RuntimeError("boom")
 
     services.assistant = Broken()
