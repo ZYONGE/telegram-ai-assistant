@@ -43,7 +43,7 @@ async def test_morning_briefing_content(todos, task_service, log, clock, provide
 
     assert decision.action is GateAction.SEND_NOW
     text = notifier.sent[0].text
-    assert text.startswith("아침 브리핑\n사용자님, 좋은 아침입니다. 9월 17일(목) 브리핑입니다.")
+    assert text.startswith("사용자님, 좋은 아침입니다. 9월 17일(목) 브리핑입니다.")  # 제목 줄 없이
     sections = [line for line in text.splitlines() if line and not line.startswith(("·", "사용자님", "아침"))]
     assert sections == ["오늘 마감", "마감이 지난 할 일", "오늘 리마인더", "새 소식", "다가오는 마감 (3일 이내)"]
     assert "· 오늘 낼 보고서 (마감 9월 17일(목) 23:59)" in text
@@ -89,7 +89,7 @@ async def test_polished_text_is_sent(todos, providers, dispatcher, notifier):
     await BriefingService(providers, dispatcher, FakePolisher("사용자님, 오늘은 보고서 하나입니다.")).send(
         BriefingKind.MORNING, kst(9, 17, 7)
     )
-    assert notifier.sent[0].text == "아침 브리핑\n사용자님, 오늘은 보고서 하나입니다."
+    assert notifier.sent[0].text == "사용자님, 오늘은 보고서 하나입니다."
 
 
 async def test_briefing_is_sent_once_per_day_and_not_counted(providers, dispatcher, notifier, log):
@@ -123,7 +123,7 @@ async def test_failing_provider_does_not_block_briefing(dispatcher, notifier):
 
 async def test_honorific_comes_from_settings(providers, dispatcher, notifier):
     await BriefingService(providers, dispatcher, None, honorific="길동님").send(BriefingKind.EVENING, kst(9, 17, 22))
-    assert notifier.sent[0].text.startswith("저녁 브리핑\n길동님, 오늘 정리와 내일 준비 사항입니다.")
+    assert notifier.sent[0].text.startswith("길동님, 오늘 정리와 내일 준비 사항입니다.")
 
 
 def test_compose_orders_sections_by_priority():
@@ -152,7 +152,7 @@ async def test_weekly_plan_covers_next_week_only(todos, task_service, log, provi
 
     assert decision.action is GateAction.SEND_NOW
     text = notifier.sent[0].text
-    assert text.startswith("주간 계획\n사용자님, 다음 주 계획입니다.")
+    assert text.startswith("사용자님, 다음 주 계획입니다.")
     sections = [line for line in text.splitlines() if line and not line.startswith(("·", "사용자님", "주간"))]
     assert sections == ["다음 주 마감", "아직 남은 일", "다음 주 리마인더", "마감 없는 할 일"]
     assert "월요일 보고서" in text and "수요일 발표" in text and "일요일 정리" in text

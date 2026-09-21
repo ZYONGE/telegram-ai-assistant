@@ -1,9 +1,14 @@
-"""텔레그램 수신: 허용된 사용자 한 명의 메시지와 확인 버튼만 처리한다. 그 외는 응답하지 않는다."""
+"""텔레그램 수신: 허용된 사용자 한 명의 메시지와 확인 버튼만 처리한다. 그 외는 응답하지 않는다.
+
+사람다운 말이 이 비서의 핵심이다 (CLAUDE.md 7절). 여기 적힌 문장(위치 저장, 버튼 처리 결과, 인사 등)은
+**전할 사실을 적은 초안**이고, 보낼 때 가벼운 모델이 상황에 맞게 다시 쓴다. 모델을 못 부르면 초안을 그대로 보낸다.
+"""
 
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Protocol
 
 from telegram import Update
 from telegram.constants import ChatAction
@@ -41,6 +46,12 @@ UNDO_DONE = "되돌렸습니다: 메일 {restored}건을 받은편지함으로 �
 UNDO_NOTHING = "되돌릴 메일이 없습니다."
 
 
+class Voice(Protocol):
+    """사실을 상황에 맞는 말로 바꿔 준다 (app/agent/light.py의 LightModel.say)."""
+
+    async def say(self, draft: str, situation: str) -> str: ...
+
+
 @dataclass(slots=True)
 class ChatServices:
     assistant: Assistant
@@ -51,13 +62,29 @@ class ChatServices:
     location: LocationStore | None = None
     # 메일 정리 되돌리기에 쓴다. Google 연결 전에는 None.
     mail: MailService | None = None
+    # 정해 둔 초안을 사람의 말로 바꾼다. 없으면 초안을 그대로 보낸다.
+    voice: Voice | None = None
+
+
+async def speak(services: ChatServices | None, draft: str, situation: str) -> str:
+    """초안을 상황에 맞는 말로. 실패하거나 목소리가 없으면 초안 그대로."""
+    voice = services.voice if services is not None else None
+    if voice is None:
+        return draft
+    try:
+        return (await voice.say(draft, situation)).strip() or draft
+    except Exception:
+        logger.exception("대답 다듬기 실패, 초안을 보냅니다")
+        return draft
+
+
+def confirm_buttons(action: PendingAction) -> tuple[Button, ...]:
+    return (Button("확인", f"{CONFIRM}:{action.id}"), Button("취소", f"{CANCEL}:{action.id}"))
 
 
 def confirmation_message(action: PendingAction) -> OutgoingMessage:
-    return OutgoingMessage(
-        f"확인이 필요합니다.\n{action.summary}",
-        buttons=(Button("확인", f"{CONFIRM}:{action.id}"), Button("취소", f"{CANCEL}:{action.id}")),
-    )
+    """확인할 것이 여럿일 때 하나씩 따로 보내는 메시지. 무엇을 누르는지 구별되게 요약만 싣는다."""
+    return OutgoingMessage(action.summary, buttons=confirm_buttons(action))
 
 
 def parse_callback(data: str | None) -> tuple[str, str] | None:
@@ -118,7 +145,9 @@ class ChatHandlers:
 
     async def on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         services: ChatServices | None = context.bot_data.get(SERVICES_KEY)
-        greeting = GREETING.format(honorific=self._honorific)
+        greeting = await speak(
+            services, GREETING.format(honorific=self._honorific), "사용자가 대화를 처음 시작했다(/start). 반갑게 맞는다"
+        )
         # 위치를 아직 한 번도 안 보냈으면 처음부터 버튼을 띄워 둔다
         need_location = (
             services is not None and services.location is not None and await services.location.latest() is None
@@ -159,6 +188,10 @@ class ChatHandlers:
             logger.error("답변 생성 실패: %s %s", type(exc).__name__, exc if transient else "", exc_info=not transient)
             await notifier.send(OutgoingMessage(FALLBACK_REPLY))
             return
+        if len(reply.confirmations) == 1:
+            # 확인할 것이 하나면 비서의 말 아래에 버튼을 바로 단다. 따로 정해 둔 문구를 한 번 더 보내지 않는다.
+            await notifier.send(OutgoingMessage(reply.text, buttons=confirm_buttons(reply.confirmations[0])))
+            return
         await notifier.send(OutgoingMessage(reply.text))
         for action in reply.confirmations:
             await notifier.send(confirmation_message(action))
@@ -184,9 +217,12 @@ class ChatHandlers:
         if update.edited_message is not None:
             return
         # 버튼은 그대로 두어 다음에도 한 번에 보낼 수 있게 한다
-        await notifier.send(
-            OutgoingMessage(LOCATION_LIVE if live_period else LOCATION_SAVED, request_location=True)
+        text = await speak(
+            services,
+            LOCATION_LIVE if live_period else LOCATION_SAVED,
+            "사용자가 텔레그램으로 위치를 보내 줘서 날씨 기준 위치로 저장했다",
         )
+        await notifier.send(OutgoingMessage(text, request_location=True))
 
     async def on_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
@@ -196,7 +232,8 @@ class ChatHandlers:
         undo_day = parse_undo(query.data or "")
         if undo_day is not None:
             await query.answer()
-            await query.edit_message_text(await handle_undo(services, undo_day))
+            await _reply_under(query, context, services, await handle_undo(services, undo_day),
+                               "사용자가 저녁 브리핑의 메일 정리 되돌리기 버튼을 눌렀고 그 결과를 알린다")
             return
 
         parsed = parse_callback(query.data)
@@ -208,4 +245,14 @@ class ChatHandlers:
             await query.answer(ALREADY_HANDLED)
             return
         await query.answer()
-        await query.edit_message_text(text)
+        await _reply_under(query, context, services, text, "사용자가 확인 또는 취소 버튼을 눌렀고 그 처리 결과를 알린다")
+
+
+async def _reply_under(query, context, services: ChatServices, draft: str, situation: str) -> None:
+    """버튼을 치우고, 처리 결과는 비서의 말로 새로 보낸다. 원래 메시지(비서가 한 말)는 그대로 둔다."""
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        logger.info("버튼을 치우지 못했습니다")
+    text = await speak(services, draft, situation)
+    await TelegramNotifier(context.bot, query.message.chat_id).send(OutgoingMessage(text))

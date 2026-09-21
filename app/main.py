@@ -210,7 +210,7 @@ async def create_runtime(settings: Settings, bot: Bot, llm: LLM | None = None) -
     scheduler.start()
     logger.info("예약 작업 %d건 복원, 스케줄러 시작", restored)
 
-    services = ChatServices(assistant, registry, conversation, location=location, mail=mail)
+    services = ChatServices(assistant, registry, conversation, location=location, mail=mail, voice=light)
     return Runtime(db, scheduler, llm, services, http)
 
 

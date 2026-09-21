@@ -51,7 +51,7 @@ async def request_delete(services, todos):
 async def test_confirmation_message_has_two_buttons(services, todos):
     action = await request_delete(services, todos)
     message = confirmation_message(action)
-    assert message.text == "확인이 필요합니다.\n할 일 삭제 — #1 지울 일"
+    assert message.text == "할 일 삭제 — #1 지울 일"
     assert [(b.label, b.callback_data) for b in message.buttons] == [
         ("확인", f"confirm:{action.id}"),
         ("취소", f"cancel:{action.id}"),
@@ -94,12 +94,17 @@ class FakeQuery:
         self.data = data
         self.answers = []
         self.edited = []
+        self.cleared = False
+        self.message = SimpleNamespace(chat_id=1)
 
     async def answer(self, text=None):
         self.answers.append(text)
 
     async def edit_message_text(self, text):
         self.edited.append(text)
+
+    async def edit_message_reply_markup(self, reply_markup=None):
+        self.cleared = True
 
 
 def context_for(bot, services):
@@ -118,12 +123,15 @@ async def test_callback_from_owner_edits_message(services, todos):
     action = await request_delete(services, todos)
     handlers = ChatHandlers(allowed_user_id=1)
     query = FakeQuery(1, f"confirm:{action.id}")
-    await handlers.on_callback(SimpleNamespace(callback_query=query), context_for(FakeBot(), services))
-    assert query.edited == ["할 일 삭제 — #1 지울 일\n→ 삭제했습니다: #1 지울 일"]
+    bot = FakeBot()
+    await handlers.on_callback(SimpleNamespace(callback_query=query), context_for(bot, services))
+    # 버튼만 치우고 비서가 한 말은 그대로 둔다. 결과는 새 메시지로 (목소리가 없으면 초안 그대로)
+    assert query.cleared and query.edited == []
+    assert [text for _, text, _ in bot.sent] == ["할 일 삭제 — #1 지울 일\n→ 삭제했습니다: #1 지울 일"]
 
     again = FakeQuery(1, f"confirm:{action.id}")
     await handlers.on_callback(SimpleNamespace(callback_query=again), context_for(FakeBot(), services))
-    assert again.answers == ["이미 처리된 요청입니다."] and again.edited == []
+    assert again.answers == ["이미 처리된 요청입니다."] and not again.cleared
 
 
 def update_for(text):
@@ -142,9 +150,63 @@ async def test_text_reply_and_confirmation_buttons_are_sent(services, todos):
     services.assistant = Assistant()
     bot = FakeBot()
     await ChatHandlers(allowed_user_id=1).on_text(update_for("1번 지워"), context_for(bot, services))
-    assert [text for _, text, _ in bot.sent] == ["확인 버튼을 보내 드렸습니다.", confirmation_message(action).text]
-    assert bot.sent[1][2] is not None
+    # 확인할 것이 하나면 비서의 말 아래에 버튼을 바로 단다. 정해 둔 문구를 한 번 더 보내지 않는다.
+    assert [text for _, text, _ in bot.sent] == ["확인 버튼을 보내 드렸습니다."]
+    assert bot.sent[0][2] is not None
     assert bot.actions == ["typing"]
+
+
+async def test_several_confirmations_are_told_apart(services, todos):
+    first = await request_delete(services, todos)
+    await todos.add("또 지울 일", kst(9, 17, 13))
+    second = (await services.registry.call("delete_todo", {"todo_id": 2}, kst(9, 17, 14))).pending
+
+    class Assistant:
+        async def reply(self, text, now, progress=None):
+            from app.agent.loop import AssistantReply
+
+            return AssistantReply("두 개 지울까요?", [first, second])
+
+    services.assistant = Assistant()
+    bot = FakeBot()
+    await ChatHandlers(allowed_user_id=1).on_text(update_for("둘 다 지워"), context_for(bot, services))
+    assert [text for _, text, _ in bot.sent] == ["두 개 지울까요?", first.summary, second.summary]
+    assert bot.sent[0][2] is None and bot.sent[1][2] is not None and bot.sent[2][2] is not None
+
+
+class FakeVoice:
+    def __init__(self):
+        self.calls = []
+
+    async def say(self, draft, situation):
+        self.calls.append((draft, situation))
+        return f"[다듬음] {draft.splitlines()[0]}"
+
+
+async def test_button_results_are_said_by_the_assistant_not_a_template(services, todos):
+    services.voice = FakeVoice()
+    action = await request_delete(services, todos)
+    bot = FakeBot()
+    await ChatHandlers(allowed_user_id=1).on_callback(
+        SimpleNamespace(callback_query=FakeQuery(1, f"confirm:{action.id}")), context_for(bot, services)
+    )
+    assert bot.sent[0][1] == "[다듬음] 할 일 삭제 — #1 지울 일"
+    draft, situation = services.voice.calls[0]
+    assert "삭제했습니다" in draft and "버튼" in situation
+
+
+async def test_a_failing_voice_falls_back_to_the_draft(services, todos):
+    class Broken:
+        async def say(self, draft, situation):
+            raise RuntimeError("모델 장애")
+
+    services.voice = Broken()
+    action = await request_delete(services, todos)
+    bot = FakeBot()
+    await ChatHandlers(allowed_user_id=1).on_callback(
+        SimpleNamespace(callback_query=FakeQuery(1, f"cancel:{action.id}")), context_for(bot, services)
+    )
+    assert bot.sent[0][1].endswith("→ 취소했습니다.")
 
 
 async def test_assistant_failure_sends_fallback(services):
@@ -310,23 +372,26 @@ async def test_undo_button_restores_mail_and_reports(services):
     mail = FakeMailService(restored=3, failed=1)
     services.mail = mail
     query = FakeQuery(1, "undo:mail:20260918")
+    bot = FakeBot()
     await ChatHandlers(allowed_user_id=1).on_callback(
-        SimpleNamespace(callback_query=query), context_for(FakeBot(), services)
+        SimpleNamespace(callback_query=query), context_for(bot, services)
     )
 
     assert [call.strftime("%Y-%m-%d") for call in mail.calls] == ["2026-09-18"]
-    assert query.edited[0].startswith("되돌렸습니다: 메일 3건")
-    assert "1건은 되돌리지 못했습니다" in query.edited[0]
+    assert query.cleared
+    assert bot.sent[0][1].startswith("되돌렸습니다: 메일 3건")
+    assert "1건은 되돌리지 못했습니다" in bot.sent[0][1]
     assert (await services.conversation.consume_notes())[0].startswith("메일 정리 되돌리기")
 
 
 async def test_undo_without_mail_service_says_nothing_to_undo(services):
     services.mail = None
     query = FakeQuery(1, "undo:mail:20260918")
+    bot = FakeBot()
     await ChatHandlers(allowed_user_id=1).on_callback(
-        SimpleNamespace(callback_query=query), context_for(FakeBot(), services)
+        SimpleNamespace(callback_query=query), context_for(bot, services)
     )
-    assert query.edited == [UNDO_NOTHING]
+    assert [text for _, text, _ in bot.sent] == [UNDO_NOTHING]
 
 
 async def test_undo_from_another_user_is_ignored(services):
@@ -335,4 +400,4 @@ async def test_undo_from_another_user_is_ignored(services):
     await ChatHandlers(allowed_user_id=1).on_callback(
         SimpleNamespace(callback_query=query), context_for(FakeBot(), services)
     )
-    assert query.edited == [] and services.mail.calls == []
+    assert query.edited == [] and not query.cleared and services.mail.calls == []

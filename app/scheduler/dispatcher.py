@@ -70,16 +70,25 @@ class Dispatcher:
 
 
 def render_event(event: Event) -> OutgoingMessage:
-    """모델 없이 만드는 기본 알림 문장. 마크다운 서식은 쓰지 않는다."""
+    """모델 없이 만드는 기본 알림 문장. 마크다운 서식은 쓰지 않는다.
+
+    브리핑은 이미 다듬은 본문만 보낸다. 제목 줄을 붙이지 않는다 (사용자 지시: 메시지에 제목을 붙이지 않는다).
+    """
+    if event.kind == EventKind.BRIEFING and event.body:
+        lines = [event.body]
+        return OutgoingMessage("\n".join(lines), buttons=_buttons(event))
     lines = [event.title]
     if event.body:
         lines.append(event.body)
     if event.due_at is not None:
         lines.append(f"마감: {format_kst(event.due_at)}")
-    # meta에 버튼이 있으면 함께 보낸다 (예: 저녁 브리핑의 메일 정리 되돌리기)
-    buttons = tuple(
+    return OutgoingMessage("\n".join(lines), buttons=_buttons(event))
+
+
+def _buttons(event: Event) -> tuple[Button, ...]:
+    """meta에 버튼이 있으면 함께 보낸다 (예: 저녁 브리핑의 메일 정리 되돌리기)."""
+    return tuple(
         Button(str(item["label"]), str(item["data"]))
         for item in event.meta.get("buttons", [])
         if isinstance(item, dict) and item.get("label") and item.get("data")
     )
-    return OutgoingMessage("\n".join(lines), buttons=buttons)

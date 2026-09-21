@@ -354,3 +354,13 @@ async def test_without_a_style_file_the_default_voice_is_used():
     light = LightModel(GeminiModel(client, "light"), style=missing)
     assert await light.polish_briefing(BriefingKind.MORNING, "초안") == "다듬은 문장"
     assert "<style>" not in client.models.calls[0]["config"].system_instruction
+
+
+async def test_facts_are_said_for_the_situation_in_the_users_style():
+    client = FakeGenAI(gemini_response(text_part("말씀하신 대로 지웠어요.")))
+    light = LightModel(GeminiModel(client, "light"), "길동님", style=lambda: "- 해요체")
+    said = await light.say("할 일 삭제 — #1 지울 일\n→ 삭제했습니다", "사용자가 확인 버튼을 눌렀다")
+    assert said == "말씀하신 대로 지웠어요."
+    system = client.models.calls[0]["config"].system_instruction
+    assert "사용자가 확인 버튼을 눌렀다" in system and "<style>" in system
+    assert "정해진 인사말이나 문구를 되풀이하지 않습니다" in system
