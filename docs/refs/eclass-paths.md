@@ -16,9 +16,13 @@
 | **한 번에** | 주소를 열면 내용까지 들어 있다 | 강의계획서, 시험, 쪽지함 |
 | **자기 자신에게 다시** | 화면의 `<form action>`이 자기 경로다. 같은 주소로 한 번 더 요청해야 줄이 온다 | 보낸 쪽지 |
 
-내용 주소(`..._list.acl`)는 브라우저 **밖에서** 부르면 "세션이 종료되었습니다"가 온다.
-열려 있는 화면 안에서 `X-Requested-With: XMLHttpRequest`를 붙여 요청해야 한다
+내용 주소(`..._list.acl`)는 그냥 부르면 "세션이 종료되었습니다"가 온다.
+`X-Requested-With: XMLHttpRequest`와 직전 화면 `Referer`를 붙여 화면 안 요청처럼 보내야 한다
 (`app/collectors/eclass/session.py`의 `post()`가 그렇게 한다).
+
+**브라우저는 필요 없다.** 로그인도 내용도 순수 HTTP로 된다 (2026-09-21 실제 계정으로 확인, ADR 0008).
+로그인은 `POST /ilos/lo/login.acl`이고, 화면의 폼에 적힌 숨은 칸(`returnURL`·`challenge`·`response`)을
+그대로 돌려보내면 된다. `challenge`·`response`는 이름과 달리 빈 값으로도 통한다.
 
 ## 2. 로그인
 

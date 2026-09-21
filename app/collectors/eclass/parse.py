@@ -295,6 +295,49 @@ def parse_list(html: str, now: datetime | None = None) -> ParseResult:
     return ParseResult(rows, skipped)
 
 
+@dataclass(frozen=True, slots=True)
+class LoginForm:
+    """로그인 화면의 폼. 숨은 칸을 그대로 되돌려 보내야 하는 사이트가 많다."""
+
+    action: str
+    # 아이디·비밀번호를 뺀 나머지 칸 (숨은 칸 포함). 받은 값을 그대로 돌려보낸다.
+    fields: dict[str, str] = field(default_factory=dict)
+    id_field: str = "usr_id"
+    password_field: str = "usr_pwd"
+
+
+def parse_login_form(html: str) -> LoginForm | None:
+    """비밀번호 칸이 있는 폼을 찾아 어디로 무엇을 보낼지 읽는다.
+
+    주소와 칸 이름을 화면에서 읽는다. 학교가 폼을 바꿔도 따라간다.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    for form in soup.find_all("form"):
+        password = form.select_one('input[type="password"][name]')
+        if password is None:
+            continue
+        password_name = str(password.get("name"))
+        fields: dict[str, str] = {}
+        id_name = ""
+        for node in form.select("input[name]"):
+            name = str(node.get("name"))
+            if name == password_name:
+                continue
+            kind = str(node.get("type", "text")).lower()
+            if not id_name and kind in ("text", "email", "tel"):
+                id_name = name
+                continue
+            if kind not in ("submit", "button", "image", "reset"):
+                fields[name] = str(node.get("value", ""))
+        return LoginForm(
+            action=str(form.get("action") or ""),
+            fields=fields,
+            id_field=id_name or "usr_id",
+            password_field=password_name,
+        )
+    return None
+
+
 def parse_syllabus(html: str) -> list[tuple[str, str]]:
     """강의계획서. 표 두 개(과목 정보, 주차별 계획)를 이름·내용 짝으로 편다.
 

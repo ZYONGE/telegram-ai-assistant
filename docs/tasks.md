@@ -247,7 +247,15 @@
 - 완료 기준: 네 가지에 답이 나온다. ① 로그인이 HTTP로 되는가 ② 껍데기+내용 방식이 httpx로 받아지는가 ③ 과목방에 httpx로 들어가지는가 ④ 수집 한 번의 최대 메모리. 답을 이 항목에 적는다.
 
 ### T-23 수집 세션 계층 정하기
-- 상태: 대기
+- 상태: 완료 (2026-09-21) — **(가) 갈래. Playwright를 걷어냈다.**
+- 한 일: `app/collectors/eclass/session.py`를 httpx로 다시 썼다. 여섯 메서드(`start`·`close`·`ensure_login`·`open`·`post`·`enter_course`)를 그대로 두어 **소스·파서·탐색기는 한 줄도 고치지 않았다.**
+  - 로그인 폼은 화면에서 읽는다 (`parse_login_form`). 주소와 칸 이름이 바뀌어도 따라간다. 받은 숨은 칸(`returnURL`·`challenge`·`response`)을 그대로 돌려보낸다.
+  - 화면 안에서 부르는 주소에는 `X-Requested-With`를, 모든 요청에 직전 화면 `Referer`를 붙인다. 브라우저 때와 같은 모양이다.
+  - 쿠키는 `private/browser/eclass_session.json`에 그대로 저장한다. Playwright가 쓰던 파일과 `cookies` 키 모양이 같아 그대로 읽힌다.
+  - 문자셋은 머리글 → 화면 meta → utf-8 순으로 본다.
+  - 요청 사이 0.3초.
+- `playwright`를 의존성에서 뺐다 (greenlet·pyee까지 3개). `playwright install chromium`도 필요 없다.
+- 확인 (윈도우 PC, 실제 계정): 저장된 쿠키로 24.1초·137건, 세션을 지우고 처음부터 로그인해도 25.1초·137건. 쿠키 4개 저장. 전체 테스트 734개 통과.
 - 선행: T-22
 - 목표: T-22 결과에 따라 `app/collectors/eclass/session.py`를 정한다.
 - 바꾸기 쉬운 이유: 소스·파서·탐색기가 세션에서 쓰는 것은 `start` · `close` · `ensure_login` · `open(path)` · `post(path, data)` · `enter_course(key)` 여섯 개뿐이다 (2026-09-21 확인). **이 모양만 맞추면 소스와 파서는 손대지 않는다.**

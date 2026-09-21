@@ -1,18 +1,29 @@
-"""eClass 브라우저 세션 (Playwright).
+"""eClass 세션 (httpx).
+
+로그인도 내용도 순수 HTTP로 된다는 것을 실제 계정으로 확인하고 브라우저를 걷어냈다
+(`scripts/eclass_http_probe.py`, ADR 0008, docs/tasks.md T-22·T-23).
+크로미움은 뜰 때마다 수백 MB를 썼다. 서버가 메모리 8GB라 그 피크가 스왑을 부른다.
 
 - **학교 계정 비밀번호는 이 모듈 밖으로 나가지 않는다.** 로그·예외 메시지·이벤트에 담지 않는다 (절대 규칙 7).
-- 로그인 세션은 private/ 안에 저장해 재사용하고, 만료됐을 때만 다시 로그인한다.
+- 로그인 세션(쿠키)은 private/ 안에 저장해 재사용하고, 만료됐을 때만 다시 로그인한다.
 - 실패는 종류를 나눠 보고한다: 로그인 실패 / 추가 인증·CAPTCHA / 구조 변경 / 네트워크.
 - 조회만 한다. 과제 제출·파일 업로드는 만들지 않는다 (절대 규칙 5).
+- 화면 안에서 부르는 주소(`..._list.acl`)는 그냥 부르면 "세션이 종료되었습니다"가 온다.
+  `X-Requested-With`와 직전 화면 `Referer`를 붙여 화면 안 요청처럼 보낸다.
 """
 
+import asyncio
+import json
 import logging
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
 from urllib.parse import urljoin
 
+import httpx
+
+from app.collectors.eclass.parse import parse_login_form
 from app.core.config import EclassSettings
 
 logger = logging.getLogger(__name__)
@@ -30,26 +41,18 @@ ACADEMIC_CALENDAR_PATH = "/ilos/st/schedule/academic_calendar_list_form.acl"
 
 ID_FIELD = "#usr_id"
 PASSWORD_FIELD = "#usr_pwd"
-# 로그인 버튼은 <div onclick="loginForm();">이라 Enter(폼 제출)로는 로그인되지 않는다
-LOGIN_BUTTON = '[onclick*="loginForm"]'
 # 로그인한 화면에만 나오는 표시. 주소만으로는 로그인 여부를 알 수 없다.
 LOGGED_IN_MARKS = ("logout.acl", "로그아웃")
 # 추가 인증이 걸린 신호 (로그인 화면에 reCAPTCHA가 나타난다)
 CAPTCHA_MARKS = ("recaptcha", "그림문자", "자동입력 방지", "captcha")
-PAGE_TIMEOUT_MS = 20_000
-
-# 화면 안에서 보내는 AJAX 요청 (세션과 헤더를 그대로 쓴다)
-_AJAX_POST = """async ({url, body}) => {
-    const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-            'X-Requested-With': 'XMLHttpRequest',
-        },
-        body,
-    });
-    return await response.text();
-}"""
+TIMEOUT_SECONDS = 20.0
+# 학교 서버에 몰아치지 않도록 요청 사이에 쉬는 시간(초)
+PAUSE_SECONDS = 0.3
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+)
+_META_CHARSET = re.compile(rb'charset=["\']?([\w-]+)', re.IGNORECASE)
 
 
 class Failure(StrEnum):
@@ -97,15 +100,33 @@ def logged_out(url: str, html: str) -> bool:
     return not logged_in(html)
 
 
+def decode(response: httpx.Response) -> str:
+    """머리글에 문자셋이 없으면 화면의 meta를 보고 읽는다. eClass는 utf-8이다."""
+    if response.charset_encoding:
+        return response.text
+    found = _META_CHARSET.search(response.content[:2048])
+    if found:
+        try:
+            return response.content.decode(found.group(1).decode("ascii"), errors="replace")
+        except LookupError:
+            pass
+    return response.content.decode("utf-8", errors="replace")
+
+
 @dataclass(slots=True)
 class EclassSession:
-    """열고 닫는 것은 호출한 쪽(수집기)이 관리한다."""
+    """열고 닫는 것은 호출한 쪽(수집기)이 관리한다.
+
+    브라우저처럼 직전 화면을 `Referer`로 붙이고, 화면 안에서 부르는 주소에는
+    `X-Requested-With`를 붙인다. 그렇게 해야 학교 서버가 화면 안 요청으로 받아 준다.
+    """
 
     settings: EclassSettings
-    _playwright: Any = None
-    _browser: Any = None
-    _context: Any = None
-    _page: Any = None
+    # 시험에서 가짜 응답을 끼워 넣을 자리. 평소에는 비어 있다.
+    transport: httpx.AsyncBaseTransport | None = field(default=None, compare=False)
+    _client: httpx.AsyncClient | None = None
+    _page_url: str = ""
+    _sent: int = 0
 
     async def __aenter__(self) -> "EclassSession":
         await self.start()
@@ -115,31 +136,20 @@ class EclassSession:
         await self.close()
 
     async def start(self) -> None:
-        try:
-            from playwright.async_api import async_playwright
-        except ImportError as exc:  # pragma: no cover - 설치 안내용
-            raise EclassError(Failure.LAYOUT, "playwright가 설치되어 있지 않습니다.") from exc
-
-        self._playwright = await async_playwright().start()
-        self._browser = await self._playwright.chromium.launch(
-            headless=True, args=list(self.settings.browser_args)
+        self._client = httpx.AsyncClient(
+            transport=self.transport,
+            cookies=self._saved_cookies(),
+            follow_redirects=True,
+            timeout=TIMEOUT_SECONDS,
+            headers={"User-Agent": USER_AGENT, "Accept-Language": "ko-KR,ko;q=0.9"},
         )
-        state = self.settings.session_file
-        self._context = await self._browser.new_context(
-            storage_state=str(state) if state.exists() else None,
-            locale="ko-KR",
-            timezone_id="Asia/Seoul",
-        )
-        self._context.set_default_timeout(PAGE_TIMEOUT_MS)
-        self._page = await self._context.new_page()
+        self._page_url = ""
+        self._sent = 0
 
     async def close(self) -> None:
-        for resource in (self._context, self._browser):
-            if resource is not None:
-                await resource.close()
-        if self._playwright is not None:
-            await self._playwright.stop()
-        self._playwright = self._browser = self._context = self._page = None
+        if self._client is not None:
+            await self._client.aclose()
+        self._client = None
 
     def url_for(self, path: str) -> str:
         return urljoin(self.settings.eclass_url, path)
@@ -147,38 +157,27 @@ class EclassSession:
     async def ensure_login(self) -> None:
         """이미 로그인되어 있으면 그대로 두고, 아니면 로그인한다."""
         html = await self.open(MAIN_PATH)
-        if not logged_out(self._page.url, html):
+        if not logged_out(self._page_url, html):
             return
         await self._login()
 
     async def _login(self) -> None:
-        await self.open(LOGIN_PATH)
-        try:
-            await self._page.fill(ID_FIELD, self.settings.username)
-            # 비밀번호는 여기서만 쓰인다
-            await self._page.fill(PASSWORD_FIELD, self.settings.password)
-            await self._page.click(LOGIN_BUTTON)
-            await self._page.wait_for_load_state("networkidle")
-        except Exception as exc:
-            raise EclassError(Failure.LAYOUT, MESSAGES[Failure.LAYOUT]) from _hide(exc)
+        form = parse_login_form(await self.open(LOGIN_PATH))
+        if form is None:
+            raise EclassError(Failure.LAYOUT, MESSAGES[Failure.LAYOUT])
 
-        reason = classify_login(self._page.url, await self._page.content())
+        # 받은 숨은 칸을 그대로 돌려보낸다. 비밀번호는 이 본문에만 들어간다.
+        data = dict(form.fields)
+        data[form.id_field] = self.settings.username
+        data[form.password_field] = self.settings.password
+        await self._request("POST", form.action or LOGIN_PATH, data=data, ajax=False)
+
+        html = await self.open(MAIN_PATH)
+        reason = classify_login(self._page_url, html)
         if reason is not None:
             raise EclassError(reason, MESSAGES[reason])
-        await self._save_session()
+        self._save_cookies()
         logger.info("eClass 로그인 성공")
-
-    async def _save_session(self) -> None:
-        path: Path = self.settings.session_file
-        path.parent.mkdir(parents=True, exist_ok=True)
-        await self._context.storage_state(path=str(path))
-
-    async def open(self, path: str) -> str:
-        try:
-            await self._page.goto(self.url_for(path), wait_until="domcontentloaded")
-            return await self._page.content()
-        except Exception as exc:
-            raise EclassError(Failure.NETWORK, MESSAGES[Failure.NETWORK]) from _hide(exc)
 
     async def enter_course(self, key: str) -> None:
         """과목방 문을 연다. 그 과목을 현재 방으로 삼을 뿐 아무것도 바꾸지 않는다 (절대 규칙 5)."""
@@ -188,16 +187,73 @@ class EclassSession:
         )
         await self.open(COURSE_ROOM_PATH)
 
-    async def post(self, path: str, data: dict[str, str]) -> str:
-        """할 일 목록처럼 AJAX로 받아야 하는 화면.
+    async def open(self, path: str) -> str:
+        """화면을 연다. 화면을 옮기는 요청이라 다음 요청의 Referer가 된다."""
+        return decode(await self._request("GET", path, ajax=False))
 
-        브라우저 밖에서 부르면 세션이 끊긴 것으로 취급되므로, 열려 있는 화면 안에서 같은 방식으로 요청한다.
-        """
-        body = "&".join(f"{key}={value}" for key, value in data.items())
+    async def post(self, path: str, data: dict[str, str]) -> str:
+        """화면 안에서 부르는 주소. 그냥 부르면 세션이 끊긴 것으로 취급된다."""
+        return decode(await self._request("POST", path, data=data, ajax=True))
+
+    async def _request(
+        self, method: str, path: str, *, ajax: bool, data: dict[str, str] | None = None
+    ) -> httpx.Response:
+        if self._client is None:
+            raise EclassError(Failure.NETWORK, MESSAGES[Failure.NETWORK])
+        headers = {"Referer": self._page_url} if self._page_url else {}
+        if ajax:
+            headers["X-Requested-With"] = "XMLHttpRequest"
         try:
-            return await self._page.evaluate(_AJAX_POST, {"url": self.url_for(path), "body": body})
+            if self._sent:
+                await asyncio.sleep(PAUSE_SECONDS)
+            self._sent += 1
+            response = await self._client.request(
+                method, self.url_for(path), headers=headers, data=data
+            )
         except Exception as exc:
             raise EclassError(Failure.NETWORK, MESSAGES[Failure.NETWORK]) from _hide(exc)
+        if not ajax:
+            # 화면을 옮긴 요청만 다음 Referer가 된다
+            self._page_url = str(response.url)
+        return response
+
+    def _saved_cookies(self) -> httpx.Cookies:
+        """지난번 로그인의 쿠키. 없거나 깨졌으면 빈 채로 시작해 다시 로그인한다."""
+        jar = httpx.Cookies()
+        path: Path = self.settings.session_file
+        if not path.exists():
+            return jar
+        try:
+            saved = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            logger.info("eClass 세션 파일을 읽지 못해 다시 로그인합니다")
+            return jar
+        for cookie in saved.get("cookies", []):
+            try:
+                jar.set(
+                    cookie["name"],
+                    cookie["value"],
+                    domain=cookie.get("domain", ""),
+                    path=cookie.get("path", "/"),
+                )
+            except (KeyError, TypeError):
+                continue
+        return jar
+
+    def _save_cookies(self) -> None:
+        """다음 수집이 다시 로그인하지 않도록 쿠키만 남긴다. 계정 정보는 담기지 않는다."""
+        if self._client is None:
+            return
+        path: Path = self.settings.session_file
+        cookies = [
+            {"name": cookie.name, "value": cookie.value, "domain": cookie.domain, "path": cookie.path}
+            for cookie in self._client.cookies.jar
+        ]
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps({"cookies": cookies}), encoding="utf-8")
+        except OSError as exc:
+            logger.info("eClass 세션을 저장하지 못했습니다 (%s)", type(exc).__name__)
 
 
 def _hide(exc: Exception) -> None:
