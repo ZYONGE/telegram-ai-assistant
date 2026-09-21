@@ -147,7 +147,6 @@ async def test_empty_list_is_not_a_failure(stores):
     [
         (Failure.LOGIN, "login"),
         (Failure.CAPTCHA, "captcha"),
-        (Failure.NETWORK, "network"),
     ],
 )
 async def test_failures_are_reported_as_collector_failed(stores, failure, expected_reason):
@@ -194,12 +193,46 @@ async def test_broken_layout_is_reported(stores):
 async def test_long_silence_adds_a_second_alert(stores):
     _items, health, _state = stores
     await health.record_success(kst(9, 18, 9))
-    session = FakeSession(error=EclassError(Failure.NETWORK, "연결 실패"))
+    session = FakeSession(error=EclassError(Failure.LAYOUT, "구조가 바뀌었습니다"))
 
     events = await collector(stores, session).collect()
     reasons = [event.meta["reason"] for event in events]
-    assert reasons == ["network", "stale"]
+    assert reasons == ["layout", "stale"]
     assert "마지막 확인" in events[1].body
+
+
+# --- 잠깐 끊긴 것과 오래 끊긴 것 (docs/tasks.md T-28) ---
+
+
+async def test_a_brief_disconnection_is_not_told_about(stores):
+    """기기를 들고 다니면 인터넷이 잠깐씩 끊긴다. 그때마다 알리면 성가시다."""
+    session = FakeSession(error=EclassError(Failure.NETWORK, "연결 실패"))
+    assert await collector(stores, session).collect() == []
+
+
+async def test_a_disconnection_that_keeps_happening_is_told_about(stores):
+    session = FakeSession(error=EclassError(Failure.NETWORK, "연결 실패"))
+    await collector(stores, session).collect()
+
+    events = await collector(stores, session).collect()
+    assert [event.meta["reason"] for event in events] == ["network"]
+
+
+async def test_a_long_silence_is_told_about_even_while_quiet_about_blips(stores):
+    """연결 문제를 참아 주더라도, 며칠째 확인이 안 되는 것은 알려야 한다."""
+    _items, health, _state = stores
+    await health.record_success(kst(9, 18, 9))
+    session = FakeSession(error=EclassError(Failure.NETWORK, "연결 실패"))
+
+    events = await collector(stores, session).collect()
+    assert [event.meta["reason"] for event in events] == ["stale"]
+
+
+async def test_other_failures_are_told_about_at_once(stores):
+    """로그인·구조 변경은 사람이 고쳐야 하는 문제다. 미룰 까닭이 없다."""
+    session = FakeSession(error=EclassError(Failure.LOGIN, "로그인 실패"))
+    events = await collector(stores, session).collect()
+    assert [event.meta["reason"] for event in events] == ["login"]
 
 
 async def test_disabled_settings_do_nothing(stores):

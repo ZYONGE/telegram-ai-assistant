@@ -206,3 +206,37 @@ def _drop_file_handlers() -> None:
         if isinstance(handler, RotatingFileHandler):
             handler.close()
             root.removeHandler(handler)
+
+
+# --- 텔레그램 오류 (docs/tasks.md T-28) ---
+
+
+async def test_a_network_error_is_one_line_not_a_stack_trace(caplog):
+    """인터넷이 끊기면 몇 초마다 재시도한다. 그때마다 스택을 찍으면 로그가 가득 찬다."""
+    from telegram.error import NetworkError
+
+    context = SimpleNamespace(error=NetworkError("httpx.ConnectError: 이름을 찾지 못했습니다"))
+    with caplog.at_level(logging.WARNING):
+        await app_main.on_telegram_error(None, context)
+
+    assert len(caplog.records) == 1
+    record = caplog.records[0]
+    assert record.levelname == "WARNING" and record.exc_info is None
+    assert "다시 붙습니다" in record.message
+
+
+async def test_a_real_error_keeps_its_stack_trace(caplog):
+    context = SimpleNamespace(error=ValueError("무언가 잘못됐다"))
+    with caplog.at_level(logging.ERROR):
+        await app_main.on_telegram_error(None, context)
+
+    assert caplog.records[0].levelname == "ERROR"
+    assert caplog.records[0].exc_info is not None
+
+
+def test_the_error_handler_is_registered():
+    """걸어 두지 않으면 텔레그램이 '처리기가 없다'며 스택을 통째로 찍는다."""
+    import inspect
+
+    source = inspect.getsource(app_main.build_application)
+    assert "add_error_handler(on_telegram_error)" in source

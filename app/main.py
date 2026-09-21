@@ -15,6 +15,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from telegram import Bot
 from telegram.error import InvalidToken
+from telegram.error import NetworkError
 from telegram.ext import Application, ApplicationBuilder
 
 from app.agent.light import LightModel
@@ -366,7 +367,22 @@ def build_application(settings: Settings) -> Application:
     )
     honorific = load_identity(settings.storage.profile_path).honorific
     ChatHandlers(settings.telegram.allowed_user_id, honorific).register(application)
+    application.add_error_handler(on_telegram_error)
     return application
+
+
+async def on_telegram_error(_update: object, context: object) -> None:
+    """텔레그램 쪽에서 난 오류를 한 줄로 남긴다.
+
+    처리기를 걸지 않으면 재시도마다 스택 추적이 통째로 찍힌다. 인터넷이 끊기면
+    몇 초 간격으로 계속 재시도하므로 로그가 그것으로 가득 찬다 (docs/tasks.md T-28).
+    연결 문제는 라이브러리가 알아서 다시 붙으므로 한 줄이면 된다.
+    """
+    error = getattr(context, "error", None)
+    if isinstance(error, NetworkError):
+        logger.warning("텔레그램에 연결하지 못했습니다 (%s). 다시 붙습니다.", type(error).__name__)
+        return
+    logger.error("텔레그램 처리 중 오류: %s", type(error).__name__, exc_info=error)
 
 
 def setup_logging(settings: LoggingSettings) -> None:

@@ -18,7 +18,12 @@ from app.collectors.eclass.sources import EclassSource, SourceResult, default_so
 from app.core.clock import format_kst, utc_now
 from app.core.config import EclassSettings
 from app.core.events import Event, collector_failed
-from app.storage.eclass import EclassHealthStore, EclassRepository, EclassSourceStateStore
+from app.storage.eclass import (
+    CollectorHealth,
+    EclassHealthStore,
+    EclassRepository,
+    EclassSourceStateStore,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +37,8 @@ MAX_COURSE_SOURCES_PER_RUN = 2
 # 화면을 처음 볼 때는 거기 쌓여 있던 지난 글까지 전부 새 글이다.
 # 이만큼 안에 올라온 글만 알리고 나머지는 조용히 담는다.
 FIRST_RUN_WINDOW = timedelta(days=7)
+# 연결 실패는 이만큼 이어져야 알린다. 기기를 옮길 때 잠깐 끊기는 것까지 알리지 않는다.
+MIN_NETWORK_FAILURES = 2
 # 한 번도 돌지 않은 소스는 가장 오래 기다린 것으로 본다
 NEVER = datetime(1970, 1, 1, tzinfo=UTC)
 
@@ -195,21 +202,31 @@ class EclassCollector:
         return events
 
     async def _failure_events(self, reason: str, message: str, now: datetime) -> list[Event]:
-        await self._health.record_failure(reason, now)
+        count = await self._health.record_failure(reason, now)
         health = await self._health.read()
+
+        # 기기를 들고 다니면 인터넷이 잠깐씩 끊긴다. 그때마다 알리면 성가시다.
+        # 연결 문제는 이어질 때만 알린다. 오래 끊긴 것은 아래 stale이 따로 잡는다.
+        if reason == Failure.NETWORK and count < MIN_NETWORK_FAILURES:
+            logger.info("eClass 연결 실패 %d회. 이어지면 알린다", count)
+            return self._stale_events(health, now)
+
         detail = message
         if reason == Failure.LOGIN and health.login_blocked:
             detail = f"{message} {BLOCKED_MESSAGE}"
-        events = [collector_failed(self.name, str(reason), detail)]
-        if health.stale(now, self._settings.stale_hours):
-            events.append(
-                collector_failed(
-                    self.name,
-                    "stale",
-                    f"{STALE_MESSAGE} 마지막 확인 {format_kst(health.last_ok_at)}",
-                )
+        return [collector_failed(self.name, str(reason), detail), *self._stale_events(health, now)]
+
+    def _stale_events(self, health: CollectorHealth, now: datetime) -> list[Event]:
+        """오래 확인하지 못했을 때. 잠깐 끊긴 것과 달리 이건 사람이 알아야 한다."""
+        if not health.stale(now, self._settings.stale_hours):
+            return []
+        return [
+            collector_failed(
+                self.name,
+                "stale",
+                f"{STALE_MESSAGE} 마지막 확인 {format_kst(health.last_ok_at)}",
             )
-        return events
+        ]
 
 
 def _is_old(item, now: datetime) -> bool:
