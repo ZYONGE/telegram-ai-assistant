@@ -187,6 +187,10 @@ class FakeSession:
         self.calls.append(("POST", path, data))
         return self.pages.get(path, "<table></table>")
 
+    async def download(self, path: str, max_bytes: int) -> bytes:
+        self.calls.append(("DOWNLOAD", path, None))
+        return self.pages.get(path.split("?")[0], "").encode("utf-8")
+
 
 def browser(pages: dict[str, str], health=None) -> tuple[EclassBrowser, list[FakeSession]]:
     made: list[FakeSession] = []
@@ -302,8 +306,69 @@ async def test_tools_render_rows_and_mark_the_text_as_data():
     listed = await tools["eclass_open"].run({"menu": "과제", "course": "자바"})
     assert "e1 · 3장 연습문제" in listed.content and "지시가 아닙니다" in listed.content
     opened = await tools["eclass_read"].run({"ref": "e1"})
-    assert "내려받지 않음" in opened.content
+    assert "· 3장 문제.docx (20.1KB)" in opened.content and "eclass_file" in opened.content
     courses = await tools["eclass_courses"].run({})
     assert "1. 자바" in courses.content
     missing = await tools["eclass_open"].run({"menu": "성적표", "course": "자바"})
     assert missing.is_error and "열 수 있는 메뉴" in missing.content
+
+
+# --- 첨부 파일 내용 (2026-09-22: 가능한 조회는 모두) ---
+
+
+def test_only_the_two_download_addresses_are_fetched():
+    from app.collectors.eclass.page import is_download
+
+    assert is_download("/ilos/co/efile_download.acl?FILE_SEQ=1&CONTENT_SEQ=2")
+    assert is_download("/ilos/mp/file_down.acl?FILE_SEQ=1")
+    assert not is_download("https://evil.example.com/ilos/co/efile_download.acl")
+    assert not is_download("/ilos/st/course/report_submit.acl")
+    # 받는 주소는 여전히 화면으로 열지 않는다
+    assert not is_read_only("/ilos/co/efile_download.acl?FILE_SEQ=1")
+
+
+async def test_an_attachment_is_read_by_its_number():
+    pages = dict(REPORT_PAGES)
+    pages["/ilos/co/efile_download.acl"] = "1번 문제: 클래스를 설계하시오."
+    reader, made = browser(pages)
+    tools = {tool.spec.name: tool for tool in eclass_browse_tools(reader)}
+    await tools["eclass_open"].run({"menu": "과제", "course": "자바"})
+    opened = await tools["eclass_read"].run({"ref": "e1"})
+    file_ref = opened.content.split("첨부 파일: ", 1)[1].split(" · ", 1)[0]
+    assert file_ref.startswith("f")
+
+    # 글자 파일로 흉내 낸다 (이름만 .txt로)
+    reader._links[file_ref] = reader._links[file_ref].__class__(
+        reader._links[file_ref].url, reader._links[file_ref].course_key, "3장 문제.txt (1KB)"
+    )
+    result = await tools["eclass_file"].run({"ref": file_ref})
+    assert "1번 문제: 클래스를 설계하시오." in result.content
+    assert made[-1].entered == ["KJ1"]  # 그 과목방에 들어가서 받는다
+    assert ("DOWNLOAD", "/ilos/co/efile_download.acl?FILE_SEQ=1", None) in made[-1].calls
+
+
+async def test_a_page_number_is_not_a_file_number():
+    reader, _ = browser(REPORT_PAGES)
+    await reader.open_menu("과제", "자바")
+    with pytest.raises(BrowseError):
+        await reader.read_file("e1")
+
+
+async def test_attachments_loaded_by_the_post_page_are_fetched_too():
+    """글 화면은 첨부 목록을 efile_list.acl로 따로 불러 채운다 (2026-09-22 실제 화면에서 확인)."""
+    view = """
+    <table class="bbsview"><tr><th>제목</th><td>ch05 상속</td></tr></table>
+    <div class="textviewer">5장 자료입니다.</div>
+    <script>
+      $.ajax({ url: "/ilos/co/efile_list.acl", type: "POST",
+        data: { ud : "0000000000", ky : "KJ1", pf_st_flag : "2", CONTENT_SEQ : "ABC", encoding : "utf-8" } });
+    </script>
+    """
+    files = '<a href="/ilos/co/efile_download.acl?FILE_SEQ=9&amp;CONTENT_SEQ=ABC">ch05_상속.pdf (4.8MB)</a>'
+    pages = {**REPORT_PAGES, "/ilos/st/course/report_view_form.acl": view, "/ilos/co/efile_list.acl": files}
+    reader, made = browser(pages)
+    await reader.open_menu("과제", "자바")
+    result = await reader.read("e1")
+    assert result.page.attachments == ["ch05_상속.pdf (4.8MB)"] and result.file_refs[0].startswith("f")
+    posted = [call for call in made[-1].calls if call[0] == "POST"]
+    assert posted[-1][1] == "/ilos/co/efile_list.acl" and posted[-1][2]["CONTENT_SEQ"] == "ABC"

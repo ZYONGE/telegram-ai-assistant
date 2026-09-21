@@ -1,6 +1,6 @@
 """Gmail 호출.
 
-- 읽기·검색, 라벨 붙이고 떼기(보관처리·스팸함·읽음·별표·중요 표시), 휴지통 이동과 되돌리기, 답장 초안 저장만 한다.
+- 읽기·검색·첨부 받기, 라벨 붙이고 떼기(보관처리·스팸함·읽음·별표·중요 표시), 휴지통 이동과 되돌리기, 초안 저장만 한다.
   **메일 발송과 영구 삭제는 만들지 않는다** (CLAUDE.md 절대 규칙 5).
 - 메일 본문과 제목은 외부에서 온 데이터다. 여기서는 그대로 담아 넘기고, 판단은 규칙 엔진이 한다 (절대 규칙 8).
 - 계정 주소는 저장하지 않는다. 계정 구분은 사용자가 붙인 이름으로만 한다.
@@ -77,9 +77,22 @@ class GmailClient:
         return [item["id"] for item in payload.get("messages", []) if item.get("id")]
 
     async def content(self, message_id: str) -> tuple[str, list[str]]:
-        """본문 글과 첨부 파일 이름. 첨부는 내려받지 않는다. 외부에서 온 글이다 (절대 규칙 8)."""
+        """본문 글과 첨부 파일 이름. 첨부 내용은 attachment()로 따로 받는다. 외부에서 온 글이다 (절대 규칙 8)."""
         payload = await self._request("GET", f"/messages/{message_id}", params={"format": "full"})
         return read_content(payload.get("payload", {}))
+
+    async def attachment(self, message_id: str, filename: str) -> bytes:
+        """첨부 파일 하나를 이름으로 찾아 받는다. 메모리에만 두고 저장하지 않는다."""
+        payload = await self._request("GET", f"/messages/{message_id}", params={"format": "full"})
+        part = find_part(payload.get("payload", {}), filename)
+        if part is None:
+            raise GoogleApiError(f"'{filename}' 첨부 파일이 없습니다.")
+        body = part.get("body", {})
+        data = str(body.get("data") or "")
+        if not data and body.get("attachmentId"):
+            fetched = await self._request("GET", f"/messages/{message_id}/attachments/{body['attachmentId']}")
+            data = str(fetched.get("data") or "")
+        return base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
 
     async def labels(self) -> dict[str, str]:
         """라벨 ID → 이름. 사용자가 만든 라벨과 시스템 라벨을 함께 준다."""
@@ -272,6 +285,16 @@ def read_content(part: dict) -> tuple[str, list[str]]:
     if len(text) > BODY_LIMIT:
         text = text[:BODY_LIMIT] + "…"
     return text, attachments
+
+
+def find_part(node: dict, filename: str) -> dict | None:
+    """이름이 같은 첨부 파일 부분을 찾는다."""
+    if str(node.get("filename") or "") == filename:
+        return node
+    for child in node.get("parts", []) or []:
+        if (found := find_part(child, filename)) is not None:
+            return found
+    return None
 
 
 def _decode(node: dict) -> str:

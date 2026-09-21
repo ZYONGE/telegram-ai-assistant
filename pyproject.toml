@@ -11,6 +11,8 @@ dependencies = [
     "google-genai>=2.24.0",
     # eClass 수집도 이것으로 한다. 브라우저는 걷어냈다 (ADR 0008, T-23)
     "httpx>=0.28.1",
+    "olefile>=0.47",
+    "pypdf>=6.19.0",
     "python-dotenv>=1.2.3",
     "python-telegram-bot>=22.8",
     # Windows에는 시스템 시간대 DB가 없어서 zoneinfo가 이 패키지를 사용한다

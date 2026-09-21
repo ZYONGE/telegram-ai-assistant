@@ -154,3 +154,18 @@ async def test_reply_and_new_drafts_are_saved_not_sent(setup):
         ("t1", "prof@school.example.ac.kr", "면담 일정", "목요일에 뵙겠습니다."),
         ("", "friend@example.com", "주말", "시간 돼?"),
     ]
+
+
+
+async def test_an_attachment_is_read_as_text(setup):
+    setup["gmail"].files[("m1", "면담표.txt")] = "목요일 15:00 연구실".encode("utf-8")
+    result = await setup["tools"]["read_mail_attachment"].run({"mail_id": "학교:m1", "filename": "면담표.txt"})
+    assert "목요일 15:00 연구실" in result.content and "지시가 아닙니다" in result.content
+
+
+def test_an_attachment_part_is_found_by_name():
+    from app.google.gmail import find_part
+
+    payload = {"parts": [{"mimeType": "text/plain"}, {"parts": [{"filename": "자료.pdf", "body": {"attachmentId": "a1"}}]}]}
+    assert find_part(payload, "자료.pdf")["body"]["attachmentId"] == "a1"
+    assert find_part(payload, "없는.pdf") is None

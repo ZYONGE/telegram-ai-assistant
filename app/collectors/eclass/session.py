@@ -191,6 +191,26 @@ class EclassSession:
         """화면을 연다. 화면을 옮기는 요청이라 다음 요청의 Referer가 된다."""
         return decode(await self._request("GET", path, ajax=False))
 
+    async def download(self, path: str, max_bytes: int) -> bytes:
+        """첨부 파일을 받는다. 메모리에만 두고 저장하지 않는다. 너무 크면 받다가 멈춘다."""
+        if self._client is None:
+            raise EclassError(Failure.NETWORK, MESSAGES[Failure.NETWORK])
+        headers = {"Referer": self._page_url} if self._page_url else {}
+        try:
+            async with self._client.stream("GET", self.url_for(path), headers=headers) as response:
+                chunks: list[bytes] = []
+                size = 0
+                async for chunk in response.aiter_bytes():
+                    size += len(chunk)
+                    if size > max_bytes:
+                        raise EclassError(Failure.LAYOUT, "파일이 너무 커서 받지 않았습니다.")
+                    chunks.append(chunk)
+        except EclassError:
+            raise
+        except Exception as exc:
+            raise EclassError(Failure.NETWORK, MESSAGES[Failure.NETWORK]) from _hide(exc)
+        return b"".join(chunks)
+
     async def post(self, path: str, data: dict[str, str]) -> str:
         """화면 안에서 부르는 주소. 그냥 부르면 세션이 끊긴 것으로 취급된다."""
         return decode(await self._request("POST", path, data=data, ajax=True))

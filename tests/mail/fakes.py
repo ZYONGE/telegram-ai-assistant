@@ -46,6 +46,7 @@ class FakeGmail:
         self.modified: list[tuple[str, tuple[str, ...], tuple[str, ...]]] = []
         self.bodies: dict[str, tuple[str, list[str]]] = {}
         self.queries: list[str] = []
+        self.files: dict[tuple[str, str], bytes] = {}
         self.drafts: list[tuple[str, str, str, str]] = []
         self.replied_threads: set[str] = set()
         self.fail_with: Exception | None = None
@@ -67,6 +68,9 @@ class FakeGmail:
 
     async def content(self, message_id: str) -> tuple[str, list[str]]:
         return self.bodies.get(message_id, ("", []))
+
+    async def attachment(self, message_id: str, filename: str) -> bytes:
+        return self.files[(message_id, filename)]
 
     async def labels(self) -> dict[str, str]:
         return {label_id: name for name, label_id in self.labels_by_name.items()}

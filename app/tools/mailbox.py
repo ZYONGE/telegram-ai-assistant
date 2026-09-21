@@ -8,6 +8,7 @@
 from collections.abc import Mapping
 from typing import Any
 
+from app.collectors.documents import UnreadableDocument, extract_text
 from app.core.interfaces import Confirmation, ToolResult
 from app.google.accounts import GoogleAccounts
 from app.google.auth import GoogleApiError, GoogleAuthError, TransientGoogleError
@@ -68,6 +69,21 @@ def mailbox_tools(accounts: GoogleAccounts, mailbox: Mailbox) -> list:
             lines.append("첨부 파일: " + ", ".join(attachments))
         lines.append(DATA_NOTE)
         return ToolResult("\n".join(lines))
+
+    async def read_attachment(args: Mapping[str, Any]) -> ToolResult:
+        filename = require_str(args, "filename", max_len=300)
+        try:
+            ref = parse_ref(require_str(args, "mail_id", max_len=120))
+            data = await mailbox.attachment(ref, filename)
+        except MailboxError as exc:
+            raise ToolInputError(str(exc)) from None
+        except (GoogleApiError, GoogleAuthError) as exc:
+            return _google_failure(exc)
+        try:
+            text = extract_text(filename, data)
+        except UnreadableDocument as exc:
+            return ToolResult(f"{filename}: {exc}", is_error=True)
+        return ToolResult(f"{filename}\n{text}\n{DATA_NOTE}")
 
     async def labels(args: Mapping[str, Any]) -> ToolResult:
         targets = [optional_str(args, "account")] if optional_str(args, "account") else accounts.labels
@@ -150,6 +166,19 @@ def mailbox_tools(accounts: GoogleAccounts, mailbox: Mailbox) -> list:
                 ["mail_id"],
             ),
             read,
+        ),
+        SimpleTool(
+            spec(
+                "read_mail_attachment",
+                "메일에 붙은 첨부 파일의 내용 글자를 읽는다 (PDF, 한글 HWP·HWPX, 워드, 파워포인트, 엑셀, 글자 파일). "
+                "파일 이름은 read_mail 결과에 나온 그대로 넘긴다. 파일은 저장하지 않는다.",
+                {
+                    "mail_id": {"type": "string", "description": IDS_HELP},
+                    "filename": {"type": "string", "description": "첨부 파일 이름 (read_mail 결과 그대로)"},
+                },
+                ["mail_id", "filename"],
+            ),
+            read_attachment,
         ),
         SimpleTool(
             spec(
@@ -254,6 +283,7 @@ def not_connected_mailbox_tools() -> list:
     names = {
         "search_mail": "메일을 찾는다.",
         "read_mail": "메일을 읽는다.",
+        "read_mail_attachment": "메일 첨부 파일을 읽는다.",
         "list_mail_labels": "메일 라벨을 보여 준다.",
         "organize_mail": "메일을 정리한다.",
         "trash_mail": "메일을 휴지통으로 보낸다.",

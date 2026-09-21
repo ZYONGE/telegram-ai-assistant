@@ -162,7 +162,7 @@ async def test_runtime_registers_every_tool_once(tmp_path):
             "list_events", "find_free_time", "add_event", "update_event", "delete_event",
             "list_mail_rules", "add_mail_rule", "delete_mail_rule",
             "list_waiting_replies", "resolve_waiting_reply", "draft_reply", "list_recent_mail",
-            "search_mail", "read_mail", "list_mail_labels", "organize_mail", "trash_mail", "spam_mail",
+            "search_mail", "read_mail", "read_mail_attachment", "list_mail_labels", "organize_mail", "trash_mail", "spam_mail",
             "draft_mail_reply", "draft_new_mail",
             "save_link", "save_note", "search_archive", "open_archive_item", "delete_archive_item",
         }

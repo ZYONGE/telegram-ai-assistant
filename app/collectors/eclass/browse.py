@@ -16,17 +16,22 @@ import asyncio
 import logging
 from collections import OrderedDict
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 
+from app.collectors.documents import MAX_BYTES
 from app.collectors.eclass.page import (
     ListRequest,
     Page,
     PageRow,
+    FILE_LIST_PATH,
     Week,
+    ajax_request,
+    is_download,
     is_read_only,
     list_request,
     parse_weeks,
+    read_files,
     read_page,
 )
 from app.collectors.eclass.parse import CourseRow, parse_course_select, parse_todo_list
@@ -91,6 +96,8 @@ class Result:
     # 줄마다 붙인 글 번호 (page.rows와 같은 순서, 열 수 없는 줄은 빈 칸)
     refs: list[str] = field(default_factory=list)
     weeks: list[Week] = field(default_factory=list)
+    # 첨부 파일 번호 (page.files와 같은 순서)
+    file_refs: list[str] = field(default_factory=list)
 
 
 class EclassBrowser:
@@ -137,6 +144,18 @@ class EclassBrowser:
                 result.heading += f" · {chosen}주차"
             return result
 
+    async def read_file(self, ref: str) -> tuple[str, bytes]:
+        """첨부 파일 하나를 받는다. 파일 번호는 글을 열었을 때 붙는다 (f1, f2 …)."""
+        link = self._links.get(ref.strip().lower())
+        if link is None or not ref.strip().lower().startswith("f"):
+            raise BrowseError(f"{ref} 첨부 파일을 찾지 못했습니다. 글을 다시 열어 번호를 확인해 주세요.")
+        if not is_download(link.url):
+            raise BrowseError("첨부 파일 주소가 아니라 받지 않았습니다.")
+        async with self._open() as session:
+            if link.course_key:
+                await session.enter_course(link.course_key)
+            return link.title, await session.download(link.url, MAX_BYTES)
+
     async def read(self, ref: str) -> Result:
         link = self._links.get(ref.strip().lower())
         if link is None:
@@ -146,7 +165,13 @@ class EclassBrowser:
         async with self._open() as session:
             if link.course_key:
                 await session.enter_course(link.course_key)
-            return self._result(link.title, read_page(await session.open(link.url)), link.course_key)
+            html = await session.open(link.url)
+            page = read_page(html)
+            # 첨부 파일 목록은 글 화면이 따로 불러 채운다
+            request = ajax_request(html, FILE_LIST_PATH)
+            if request is not None and not page.files:
+                page = replace(page, files=read_files(await session.post(request.url, request.data())))
+            return self._result(link.title, page, link.course_key)
 
     # --- 안쪽 ---
 
@@ -175,14 +200,15 @@ class EclassBrowser:
 
     def _result(self, heading: str, page: Page, course_key: str) -> Result:
         refs = [self._remember(Link(row.link, course_key, row.text.split(" · ")[0])) if row.link else "" for row in page.rows]
-        return Result(heading, page, refs)
+        files = [self._remember(Link(url, course_key, name), "f") for name, url in page.files]
+        return Result(heading, page, refs, file_refs=files)
 
-    def _remember(self, link: Link) -> str:
+    def _remember(self, link: Link, prefix: str = "e") -> str:
         for ref, known in self._links.items():
-            if known.url == link.url and known.course_key == link.course_key:
+            if known.url == link.url and known.course_key == link.course_key and ref.startswith(prefix):
                 self._links.move_to_end(ref)
                 return ref
-        ref = f"e{self._next}"
+        ref = f"{prefix}{self._next}"
         self._next += 1
         self._links[ref] = link
         while len(self._links) > MAX_LINKS:

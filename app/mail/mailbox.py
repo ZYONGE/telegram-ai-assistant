@@ -149,6 +149,10 @@ class Mailbox:
         mine = tuple(names[label] for label in message.labels if label in names)
         return Found(ref, message, mine), body, attachments
 
+    async def attachment(self, ref: MailRef, filename: str) -> bytes:
+        """첨부 파일 하나를 받는다. 저장하지 않는다."""
+        return await self._account(ref.account).gmail.attachment(ref.message_id, filename)
+
     async def labels(self, account: str) -> list[str]:
         return sorted((await self._user_labels(self._account(account))).values())
 
