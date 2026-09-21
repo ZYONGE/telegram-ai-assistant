@@ -3,7 +3,6 @@ import pytest
 from app.agent.light import LightModel
 from app.agent.loop import (
     BLOCKED_REPLY,
-    DEFAULT_ACK,
     INTERRUPTED_RESULT,
     TOO_MANY_STEPS_REPLY,
     Assistant,
@@ -265,10 +264,11 @@ def test_strip_markdown():
     assert strip_markdown("## 오늘\n- **보고서**\n* `코드`") == "오늘\n· 보고서\n· 코드"
 
 
-# --- 먼저 보내는 한 줄 (사용자 지시 2026-09-21) ---
+# --- 먼저 보내는 한 줄 (사용자 지시 2026-09-22) ---
+# 여러 단계 작업이면 모델이 도구를 부르며 한 줄을 쓰고, 단순 조회면 쓰지 않는다. 코드가 정해 둔 문구는 없다.
 
 
-async def test_a_tool_request_is_acknowledged_first_with_the_models_words(make_assistant):
+async def test_a_multi_step_request_is_acknowledged_first_with_the_models_words(make_assistant):
     assistant, _, _ = make_assistant(
         gemini_response(
             text_part("할 일 확인하고 말씀드릴게요."),
@@ -288,7 +288,8 @@ async def test_a_tool_request_is_acknowledged_first_with_the_models_words(make_a
     assert reply.text == "남은 할 일이 없습니다."
 
 
-async def test_a_default_line_is_sent_when_the_model_says_nothing(make_assistant):
+async def test_a_simple_lookup_gets_only_the_result(make_assistant):
+    """모델이 도구만 부르고 말을 붙이지 않았으면 먼저 보낼 것이 없다. 정해 둔 문구로 채우지 않는다."""
     assistant, _, _ = make_assistant(
         gemini_response(call_part("c1", "list_todos", {})),
         gemini_response(text_part("남은 할 일이 없습니다.")),
@@ -298,8 +299,15 @@ async def test_a_default_line_is_sent_when_the_model_says_nothing(make_assistant
     async def progress(text: str) -> None:
         sent.append(text)
 
-    await assistant.reply("할 일 알려줘", kst(9, 17, 14), progress)
-    assert sent == [DEFAULT_ACK]
+    reply = await assistant.reply("할 일 알려줘", kst(9, 17, 14), progress)
+    assert sent == [] and reply.text == "남은 할 일이 없습니다."
+
+
+def test_there_are_no_canned_acknowledgements():
+    """정해 둔 문장을 돌려 쓰면 같은 패턴이 되풀이된다 (사용자 지시). 코드에 문구를 두지 않는다."""
+    import app.agent.loop as loop
+
+    assert not hasattr(loop, "ACKS") and not hasattr(loop, "DEFAULT_ACK")
 
 
 async def test_plain_chat_is_not_acknowledged(make_assistant):
@@ -315,7 +323,7 @@ async def test_plain_chat_is_not_acknowledged(make_assistant):
 
 async def test_a_failed_acknowledgement_does_not_stop_the_request(make_assistant):
     assistant, _, _ = make_assistant(
-        gemini_response(call_part("c1", "list_todos", {})),
+        gemini_response(text_part("할 일 목록을 정리해 볼게요."), call_part("c1", "list_todos", {})),
         gemini_response(text_part("남은 할 일이 없습니다.")),
     )
 

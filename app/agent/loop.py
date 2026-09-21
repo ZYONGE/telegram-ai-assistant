@@ -3,8 +3,10 @@
 - 대화 기록은 SQLite에 추가만 한다. 모델 응답은 제공자 형식 그대로 저장하고 그대로 다시 보낸다.
 - 유휴 시간이 지나거나 기록이 길어지면 가벼운 모델로 요약하고, 요약을 담은 새 대화로 이어 간다 (nanobot 참고, docs/adr/0003).
 - 도구 확인 단계는 ToolRegistry가 적용한다. 모델 제공사별 형식은 app/llm 어댑터가 맡는다 (docs/adr/0004).
-- 도구를 쓰는 요청이면 끝나기 전에 "확인하고 말씀드릴게요" 같은 한 줄을 먼저 보낸다 (사용자 지시 2026-09-21).
-  모델이 도구를 부르며 함께 쓴 문장을 보내고, 없으면 기본 문장을 보낸다. 한 요청에 한 번만.
+- 여러 단계를 거치는 요청이면 끝나기 전에 무엇을 하려는지 한 줄을 먼저 보낸다 (사용자 지시 2026-09-22).
+  그 한 줄은 **모델이 도구를 부르며 함께 쓴 문장만** 보낸다. 코드가 정해 둔 문구는 없다.
+  단순 조회라 따로 말할 것이 없으면 모델이 쓰지 않고, 그러면 결과만 간다.
+  정해 둔 문장을 돌려 쓰면 기계처럼 되풀이된다. 문맥에 맞는 말은 모델만 쓸 수 있다.
 """
 
 import asyncio
@@ -30,8 +32,6 @@ MAX_OUTPUT_TOKENS = 16000
 BLOCKED_REPLY = "그 요청은 도와드리기 어렵습니다."
 TOO_MANY_STEPS_REPLY = "처리할 단계가 너무 많아 여기서 멈췄습니다. 요청을 나눠서 말씀해 주세요."
 INTERRUPTED_RESULT = "이 도구 실행은 중단되어 결과가 없습니다."
-# 도구를 쓰기 시작할 때 먼저 보내는 한 줄. 모델이 쓴 문장이 없을 때만 쓴다.
-DEFAULT_ACK = "확인하고 말씀드릴게요."
 
 # 처리 중에 먼저 보낼 말을 받는 곳 (텔레그램 채널이 채운다)
 Progress = Callable[[str], Awaitable[None]]
@@ -147,7 +147,9 @@ class Assistant:
 
             if not acknowledged:
                 acknowledged = True
-                await _send_progress(progress, strip_markdown(turn.text.strip()) or DEFAULT_ACK)
+                # 모델이 쓴 한 줄만 보낸다. 쓰지 않았으면(단순 조회) 결과만 간다.
+                if written := strip_markdown(turn.text.strip()):
+                    await _send_progress(progress, written)
 
             results: list[tuple[ToolCall, ToolResult]] = []
             for call in turn.tool_calls:
