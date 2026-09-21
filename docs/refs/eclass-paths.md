@@ -97,6 +97,7 @@ GET  /ilos/st/course/submain_form.acl      ← 방 첫 화면
 | 과제 상세 | `report_view_form.acl?RT_SEQ=…`. `table.bbsview`(제출방식·마감일·지각제출·점수공개) + `.textviewer` 본문. 본문 끝에 "첨부파일(N개) - 이름"이 붙는다 |
 | 과제 번호 | 과제 게시판 글번호(`RT_SEQ`)와 할 일 목록의 번호가 같다. 이것으로 할 일과 이어진다 |
 | 시험 상세 | `test_view_form.acl?exam_setup_seq=…`. 시험 정보 `bbsview` + 응시 기록 표(시작·종료·IP) + 점수. 여는 것만으로는 응시가 시작되지 않는다 |
+| 첨부 파일 목록 | 글 화면이 `POST /ilos/co/efile_list.acl`(ud·ky·pf_st_flag·CONTENT_SEQ)로 따로 불러 채운다. 응답 조각의 `efile_download.acl?FILE_SEQ=…&CONTENT_SEQ=…` 링크로 받는다 (2026-09-22 확인) |
 | 받은 쪽지 열기 | 목록의 `viewPage('SEQ','SEND_ID')` → `/ilos/message/received_view_pop_form.acl?SEQ=…&SEND_ID=…` (GET) |
 | 알림함 | `POST /ilos/mp/notification_list.acl` (`start`, `display`, `OPEN_DTM`=빈 값). 표가 아니라 글로 온다 |
 | 성적 | `eval3_result_view_form.acl`. 공개 전에는 "최종성적이 공개되지 않았습니다" |

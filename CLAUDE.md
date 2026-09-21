@@ -45,6 +45,7 @@
 | 스케줄러 | APScheduler + SQLite 작업 저장 (재시작 후에도 예약 유지). 작업 원본은 `scheduled_tasks` 표, APScheduler는 메모리에서 시각만 계산 (`docs/adr/0002`) |
 | 외부 연동 | Google Calendar·Gmail API (계정 여러 개, OAuth 직접 구현, `docs/adr/0006`), 기상청 단기예보 API, 웹 검색은 Gemini의 Google 검색 그라운딩 (`docs/adr/0005`) |
 | eClass 수집 | **httpx + BeautifulSoup** (순수 HTTP. 로그인도 된다는 것을 확인하고 Playwright를 걷어냈다, T-23, `docs/adr/0008`). 비서가 그 자리에서 여는 조회 도구도 같은 세션을 쓴다 (T-30) |
+| 첨부 파일 읽기 | pypdf(BSD-3)·olefile(BSD-2) + 표준 라이브러리(HWPX·DOCX·PPTX·XLSX). 파일은 저장하지 않는다 (`app/collectors/documents.py`) |
 | 시간 | 저장은 UTC, 판단·표시는 `Asia/Seoul` |
 | 배포 | **임시: 맥북에어 M1 (8GB, macOS) — 네이티브 venv + launchd LaunchDaemon(`KeepAlive`)**. Docker Desktop은 쓰지 않는다 (`docs/adr/0008`). Oracle Cloud는 쓰지 않기로 했다 (2026-09-21 사용자 결정). Docker 파일(`deploy/`)은 다른 서버로 옮길 때를 위해 남겨 둔다 |
 | 원격 관리 | SSH + Tailscale. 포트를 밖에 열지 않는다 |
