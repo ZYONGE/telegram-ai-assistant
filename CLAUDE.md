@@ -40,7 +40,7 @@
 | 패키지 관리 | uv. `uv.lock`으로 윈도우·맥·arm64 서버에서 같은 버전 사용 |
 | 메신저 | `python-telegram-bot`, **폴링 방식** (웹훅 사용 안 함) |
 | 모델 | Gemini (`google-genai`). 기본 `gemini-3.5-flash-lite`(대화·가벼운 작업 공통). 모델 이름과 제공사는 `config.toml`의 `[llm]`에서 관리. 모델 호출은 `app/llm/`에만 둔다 (`docs/adr/0004`) |
-| 모델 호출 경로 | 목표는 Cloud 결제 계정을 연결한 Google Cloud 프로젝트로 호출하는 것이다 (B안, 무료 티어 데이터 학습 사용 회피). 기본은 그 프로젝트의 Gemini API 키, 선택으로 Vertex AI. **현재는 결제 미연결 무료 티어 키로 운영 중** (`allow_free_tier = true`, 사용자 결정) |
+| 모델 호출 경로 | 목표는 Cloud 결제 계정을 연결한 Google Cloud 프로젝트로 호출하는 것이다 (B안, 무료 티어 데이터 학습 사용 회피). 기본은 그 프로젝트의 Gemini API 키, 선택으로 Vertex AI. **무료 티어 키로 운영한다** (`allow_free_tier = true`). 입력이 제품 개선에 쓰일 수 있다는 점을 사용자가 2026-09-21에 명시적으로 양해했다. 결제 연결은 하지 않는다 |
 | 저장소 | 구조화 데이터는 SQLite, 장기 기억만 마크다운 파일 |
 | 스케줄러 | APScheduler + SQLite 작업 저장 (재시작 후에도 예약 유지). 작업 원본은 `scheduled_tasks` 표, APScheduler는 메모리에서 시각만 계산 (`docs/adr/0002`) |
 | 외부 연동 | Google Calendar·Gmail API (계정 여러 개, OAuth 직접 구현, `docs/adr/0006`), 기상청 단기예보 API, 웹 검색은 Gemini의 Google 검색 그라운딩 (`docs/adr/0005`) |

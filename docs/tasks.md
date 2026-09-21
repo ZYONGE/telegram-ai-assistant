@@ -266,7 +266,7 @@
 - 완료 기준: 기존 eClass 테스트 전부 통과 + 실제 계정으로 1회 수집 + 수집 중 최대 메모리를 T-22 값과 비교해 적는다.
 
 ### T-24 맥북에어 서버 기본 설정
-- 상태: 대기
+- 상태: 대기 — **절차는 `deploy/macos/README.md` 1~2절에 다 적어 두었다**
 - 환경: **서버 맥북에어 M1**
 - 할 일
   - uv 설치 → 저장소 받기 → `git config core.hooksPath .githooks` → `uv sync --no-dev`
@@ -278,9 +278,10 @@
 - 완료 기준: 서버에서 `uv run pytest` 통과, 봇을 손으로 한 번 띄워 텔레그램 대화가 된다.
 
 ### T-25 launchd로 상시 실행
-- 상태: 대기
-- 선행: T-24
-- 손댈 곳: `deploy/macos/` (새로) — LaunchDaemon plist, 설치·제거 안내. plist 작성은 어느 기기에서나 되고, 설치는 서버에서.
+- 상태: **파일 완료 (2026-09-21) · 서버에서 설치 대기**
+- 만든 것: `deploy/macos/com.assistant.bot.plist`, `deploy/macos/README.md`(0~6절에 설정 전 과정).
+- 정한 것: `/Library/LaunchDaemons/`(로그인 없이 부팅 때 뜬다) · `UserName`으로 일반 사용자 · `KeepAlive {SuccessfulExit=false}`(비정상 종료일 때만 되살림) · `ThrottleInterval 60` · `.venv`의 파이썬 직접 실행 · 표준 출력은 `private/logs/launchd.*.log`로 따로.
+- **plist의 `사용자이름`은 서버에서 바꾸고 커밋하지 않는다** (개인정보).
 - 정할 것
   - `/Library/LaunchDaemons/`에 둔다 → 부팅하면 로그인 없이 뜬다. 기본은 root로 뜨므로 `UserName`으로 일반 사용자로 내린다.
   - `KeepAlive`는 `{SuccessfulExit = false}`로 — **비정상 종료일 때만** 다시 띄운다. 설정 오류로 바로 죽는 경우(`main.py`가 종료 코드 1로 끝난다)에는 되살아나 봐야 또 죽으므로 `ThrottleInterval`로 간격을 둔다.
@@ -289,7 +290,7 @@
 - 완료 기준: 재부팅 뒤 로그인하지 않아도 봇이 대답한다. 프로세스를 강제로 죽이면 다시 뜬다.
 
 ### T-26 원격 관리 (SSH + Tailscale)
-- 상태: 대기
+- 상태: 대기 — 절차는 `deploy/macos/README.md` 4절. **Tailscale 계정은 이미 있다** (2026-09-21 확인)
 - 선행: T-24
 - 환경: 서버 맥북에어 M1
 - 할 일: Tailscale 설치·로그인, macOS 원격 로그인(sshd) 켜기, **키 인증만** 허용하고 비밀번호 로그인은 끈다. 공유기에 포트를 열지 않는다.
@@ -318,7 +319,7 @@
 > A1 인스턴스를 확보하면 여기로 돌아온다 (ADR 0008 "A1으로 옮길 때"). T-15~T-17은 기기와 상관없이 이미 끝났다.
 
 ### T-13 Docker 이미지 (arm64)
-- 상태: **보류** (2026-09-21) — 코드 완료. A1 인스턴스를 확보하면 서버에서 확인한다 (ADR 0008)
+- 상태: **폐기** (2026-09-21 사용자 결정) — Oracle Cloud를 접었다. `deploy/Dockerfile`·`compose.yaml`은 남겨 둔다. 나중에 리눅스 서버를 쓰게 되면 그대로 쓸 수 있고, 지우면 다시 만들어야 한다
 - 한 일: `deploy/Dockerfile`, `deploy/compose.yaml`, `deploy/README.md`, `.dockerignore`.
 - **Playwright arm64 지원 확인**: 공식 문서가 "Debian 12/13, Ubuntu 22.04/24.04/26.04 (x86-64 or arm64)"를 지원한다고 적고 있다 (2026-09-20 확인). 여기서 막힐 걱정은 없앴다.
 - 정한 것
@@ -337,7 +338,7 @@
 - 완료 기준: arm64 이미지가 빌드되고 컨테이너 안에서 eClass 로그인이 한 번 성공한다.
 
 ### T-14 Compose와 서버 배포
-- 상태: **보류** (2026-09-21) — A1 인스턴스를 확보하면 한다. 그동안은 맥북에어 임시 서버(T-24~T-28)
+- 상태: **폐기** (2026-09-21 사용자 결정) — 배포는 맥북에어로 한다 (T-24~T-28, `deploy/macos/README.md`)
 - 선행: T-13
 - 손댈 곳: `deploy/compose.yaml`, 배포 절차를 `docs/progress.md` 운영 방법에 추가
 - 챙길 것: `private/` 폴더를 볼륨으로 붙인다(이미지에 넣지 않는다), 시간대 `Asia/Seoul`, 재시작 정책, 로그 회전.

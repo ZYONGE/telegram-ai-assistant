@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  비서를 맥북에어에서 24시간 돌린다 (ADR 0008, docs/tasks.md T-25).
+
+  /Library/LaunchDaemons/ 에 두면 로그인하지 않아도 부팅 때 뜬다.
+  <바꿀곳> 두 군데를 실제 값으로 바꾸고 설치한다. 설치 방법은 deploy/macos/README.md.
+
+  - UserName: root로 돌리지 않는다. 봇이 뚫려도 기기 전체를 잡지 못한다.
+  - KeepAlive SuccessfulExit=false: **비정상 종료일 때만** 다시 띄운다.
+    설정이 틀려 바로 죽는 경우(main.py가 종료 코드 1로 끝난다)에는 되살려 봐야 또 죽는다.
+  - ThrottleInterval: 그래도 되살아나는 경우를 대비해 간격을 둔다.
+  - .venv의 파이썬을 직접 부른다. uv를 거치지 않으면 뜰 때 메모리가 조금 덜 든다.
+  - 표준 출력·오류는 T-17 로그 파일과 겹치지 않게 따로 둔다.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.assistant.bot</string>
+
+    <key>UserName</key>
+    <string>사용자이름</string>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/사용자이름/telegram-ai-assistant</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/사용자이름/telegram-ai-assistant/.venv/bin/python</string>
+        <string>-m</string>
+        <string>app.main</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>TZ</key>
+        <string>Asia/Seoul</string>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <key>ThrottleInterval</key>
+    <integer>60</integer>
+
+    <key>StandardOutPath</key>
+    <string>/Users/사용자이름/telegram-ai-assistant/private/logs/launchd.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/사용자이름/telegram-ai-assistant/private/logs/launchd.err.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>
