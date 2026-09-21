@@ -266,7 +266,11 @@
 - 완료 기준: 기존 eClass 테스트 전부 통과 + 실제 계정으로 1회 수집 + 수집 중 최대 메모리를 T-22 값과 비교해 적는다.
 
 ### T-24 맥북에어 서버 기본 설정
-- 상태: 대기 — **절차는 `deploy/macos/README.md` 1~2절에 다 적어 두었다**
+- 상태: 완료 (2026-09-21)
+- macOS 27.0 · arm64 · 8GB. 시스템 설정은 사용자가 직접(FileVault 끔·전원 어댑터 잠자기 없음·화면 2분·자동 로그인 끔·원격 로그인 켬·업데이트 자동 설치 끔·시간대 서울), 터미널 작업은 개발 PC에서 Tailscale SSH로 했다.
+- **FileVault는 껐다** (2026-09-21 사용자 결정, 분실 위험 없음). 덕분에 정전·강제 재시작 뒤에도 사람 없이 봇이 다시 뜬다.
+- `private/`는 git이 아니라 `scp`로 옮겼다. 옮기기 전에 윈도우 봇을 멈춰 DB가 쓰이는 중에 복사되지 않게 했다. 옮긴 뒤 `chmod 700 private`, `600 .env·google_*.json`.
+- 확인: `.venv/bin/python -m app.main`으로 직접 띄워 22개 소스·메일·eClass·백업 일정이 모두 잡히는 것과, 텔레그램으로 답이 오는 것을 봤다.
 - 환경: **서버 맥북에어 M1**
 - 할 일
   - uv 설치 → 저장소 받기 → `git config core.hooksPath .githooks` → `uv sync --no-dev`
@@ -278,7 +282,7 @@
 - 완료 기준: 서버에서 `uv run pytest` 통과, 봇을 손으로 한 번 띄워 텔레그램 대화가 된다.
 
 ### T-25 launchd로 상시 실행
-- 상태: **파일 완료 (2026-09-21) · 서버에서 설치 대기**
+- 상태: 완료 (2026-09-21) — `/Library/LaunchDaemons/com.assistant.bot.plist` 설치·기동 확인
 - 만든 것: `deploy/macos/com.assistant.bot.plist`, `deploy/macos/README.md`(0~6절에 설정 전 과정).
 - 정한 것: `/Library/LaunchDaemons/`(로그인 없이 부팅 때 뜬다) · `UserName`으로 일반 사용자 · `KeepAlive {SuccessfulExit=false}`(비정상 종료일 때만 되살림) · `ThrottleInterval 60` · `.venv`의 파이썬 직접 실행 · 표준 출력은 `private/logs/launchd.*.log`로 따로.
 - **plist의 `사용자이름`은 서버에서 바꾸고 커밋하지 않는다** (개인정보).
@@ -290,14 +294,20 @@
 - 완료 기준: 재부팅 뒤 로그인하지 않아도 봇이 대답한다. 프로세스를 강제로 죽이면 다시 뜬다.
 
 ### T-26 원격 관리 (SSH + Tailscale)
-- 상태: 대기 — 절차는 `deploy/macos/README.md` 4절. **Tailscale 계정은 이미 있다** (2026-09-21 확인)
+- 상태: 완료 (2026-09-21)
+- 개발 PC와 서버가 **다른 네트워크에 있다.** 개발 PC는 공인 IP를 직접 쓰고 서버는 집 공유기 안이라 사설 주소로는 닿지 않는다. Tailscale이 둘을 잇는다. 공유기에 포트를 열지 않았다.
+- 키 접속을 확인한 **뒤에** 비밀번호 로그인을 껐다 (`PasswordAuthentication no`, `KbdInteractiveAuthentication no`, `PermitRootLogin no`).
+- 개발 PC에서 `ssh 사용자@<Tailscale 주소>`로 로그 보기·`git pull`·재시작이 된다. 주소와 계정은 여기 적지 않는다.
 - 선행: T-24
 - 환경: 서버 맥북에어 M1
 - 할 일: Tailscale 설치·로그인, macOS 원격 로그인(sshd) 켜기, **키 인증만** 허용하고 비밀번호 로그인은 끈다. 공유기에 포트를 열지 않는다.
 - 완료 기준: 개발 기기에서 Tailscale 주소로 SSH 접속, `git pull` → 재시작까지 원격으로 된다. 절차를 `docs/progress.md` 운영 방법에 적는다 (주소·계정은 적지 않는다).
 
 ### T-27 메모리 재기와 감시
-- 상태: 대기
+- 상태: 진행 중 (2026-09-21 첫 측정)
+- **첫 측정: 상주 메모리 44MB** (기동 직후 99MB에서 안정화). 목표로 잡았던 200MB의 4분의 1이다. Playwright를 걷어낸 것(T-23)이 컸다.
+- 스왑은 97MB 쓰이고 있었으나 봇을 띄우기 전부터 있던 양이다. 하루 돌린 뒤 다시 본다.
+- 남은 것: 하루치 관찰, eClass 수집 때의 최대치, 스왑 감시를 비서 기능으로 넣을지 결정
 - 선행: T-25
 - 목표: 봇이 상주하며 쓰는 메모리와 수집할 때의 최대치를 재고, 목표치를 정한다.
 - 할 일: 하루 돌린 뒤 봇 프로세스의 상주 메모리(RSS)와 스왑 사용(`sysctl vm.swapusage`)을 적는다. 스왑이 생기면 원인(eClass 수집 피크인지, 상주량인지)을 가린다.
