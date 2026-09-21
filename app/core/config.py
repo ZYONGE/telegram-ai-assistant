@@ -11,7 +11,7 @@ import re
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import time
+from datetime import time, timedelta
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -45,6 +45,15 @@ class NotificationSettings:
     # 수집 실패가 같은 원인으로 이어질 때 몇 시간마다 다시 알릴지. 0이면 한 번만 알린다.
     # 같은 소식을 되풀이하지 않는 것이 기본이지만, 며칠째 수집이 안 되는 것은 계속 알려야 한다.
     failure_repeat_hours: int = 6
+    # 할 일 마감 전 알림 시점 (사용자 지시 2026-09-21). 끝낸 일은 알리지 않는다.
+    deadline_reminders: tuple[timedelta, ...] = (
+        timedelta(days=7),
+        timedelta(days=4),
+        timedelta(days=1),
+        timedelta(hours=12),
+        timedelta(hours=3),
+        timedelta(hours=1),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -357,6 +366,11 @@ def load_settings(
                 failure_repeat_hours=int(
                     notification.get("failure_repeat_hours", n_default.failure_repeat_hours)
                 ),
+                deadline_reminders=(
+                    parse_durations(notification["deadline_reminders"])
+                    if "deadline_reminders" in notification
+                    else n_default.deadline_reminders
+                ),
             ),
             storage=StorageSettings(
                 db_path=path(storage["db_path"]),
@@ -489,3 +503,15 @@ def _weather(section: Mapping[str, Any], env: Mapping[str, str]) -> WeatherSetti
         location_ttl_hours=int(section.get("location_ttl_hours", 0)),
         location_recent_hours=int(section.get("location_recent_hours", 6)),
     )
+
+
+def parse_durations(values: list[str] | tuple[str, ...]) -> tuple[timedelta, ...]:
+    """["7d", "12h", "30m"] → 시간 간격. 알아볼 수 없는 값이 있으면 설정 오류로 본다."""
+    units = {"d": "days", "h": "hours", "m": "minutes"}
+    durations = []
+    for value in values:
+        text = str(value).strip().lower()
+        if len(text) < 2 or text[-1] not in units or not text[:-1].isdigit() or int(text[:-1]) <= 0:
+            raise ConfigError(f"시간 간격을 읽지 못했습니다: {value!r} (예: 7d, 12h, 30m)")
+        durations.append(timedelta(**{units[text[-1]]: int(text[:-1])}))
+    return tuple(durations)

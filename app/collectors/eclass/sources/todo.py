@@ -51,7 +51,8 @@ class TodoSource:
                 urgent=True,
                 due_at=item.due_at,
                 ref_id=f"{item.item_id}:due:{item.due_at.isoformat() if item.due_at else 'none'}",
-                meta={"course": item.course, "category": item.kind},
+                # 할 일의 마감도 함께 옮긴다. 옛 마감으로 리마인더가 가지 않게 한다.
+                meta={"course": item.course, "category": item.kind, "todo_ref": item.item_id},
             )
 
         return Event(

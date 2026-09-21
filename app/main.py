@@ -46,6 +46,7 @@ from app.scheduler.briefing import (
     TodoBriefing,
     WeatherBriefing,
 )
+from app.scheduler.deadlines import CHECK_EVERY, DeadlineReminder
 from app.scheduler.dispatcher import Dispatcher
 from app.scheduler.gate import RuleBasedGate
 from app.scheduler.ingest import Ingestor
@@ -105,7 +106,8 @@ async def create_runtime(settings: Settings, bot: Bot, llm: LLM | None = None) -
     conversation = ConversationStore(db)
 
     notifier = TelegramNotifier(bot, settings.telegram.allowed_user_id)
-    dispatcher = Dispatcher(RuleBasedGate(log, settings.notification), log, notifier)
+    gate = RuleBasedGate(log, settings.notification)
+    dispatcher = Dispatcher(gate, log, notifier)
     scheduler = AsyncIOScheduler(timezone=KST)
     tasks = TaskService(TaskRepository(db), scheduler, dispatcher)
 
@@ -191,7 +193,8 @@ async def create_runtime(settings: Settings, bot: Bot, llm: LLM | None = None) -
     )
     ingestor = Ingestor(todos, dispatcher)
     backup = BackupService(db, settings.storage.db_path.parent, settings.backup)
-    _add_system_jobs(scheduler, settings, dispatcher, assistant, briefing)
+    deadlines = DeadlineReminder(todos, dispatcher, gate, settings.notification.deadline_reminders)
+    _add_system_jobs(scheduler, settings, dispatcher, assistant, briefing, deadlines)
     _add_collector_jobs(scheduler, settings, ingestor, mail_collector, google, eclass_collector)
     _add_backup_job(scheduler, settings, ingestor, backup)
     restored = await tasks.start()
@@ -208,6 +211,7 @@ def _add_system_jobs(
     dispatcher: Dispatcher,
     assistant: Assistant,
     briefing: BriefingService,
+    deadlines: DeadlineReminder | None = None,
 ) -> None:
     def safe(name: str, job: Callable[[], Awaitable[object]]) -> Callable[[], Awaitable[None]]:
         async def run() -> None:
@@ -230,6 +234,12 @@ def _add_system_jobs(
             safe(f"{kind} 브리핑", lambda kind=kind: briefing.send(kind, utc_now())),
             CronTrigger(hour=at.hour, minute=at.minute, timezone=KST),
             id=f"system:briefing:{kind}", coalesce=True, max_instances=1, misfire_grace_time=1800,
+        )
+    if deadlines is not None:
+        # 마감 전 정해 둔 시점마다 한 번씩. 시점보다 늦지 않게, 확인 간격만큼 일찍 알아챈다.
+        scheduler.add_job(
+            safe("마감 리마인더", lambda: deadlines.run(utc_now())),
+            IntervalTrigger(seconds=CHECK_EVERY.total_seconds()), id="system:deadlines", coalesce=True, max_instances=1,
         )
     # 주간 계획: 일요일 저녁에 다음 주를 정리한다
     weekly = settings.briefing.weekly

@@ -39,10 +39,20 @@ class Ingestor:
                     continue
                 if event.kind in TODO_KINDS:
                     await self._todos.add_from_event(event, now)
+                elif event.kind == EventKind.DEADLINE_CHANGED:
+                    await self._move_due(event, now)
                 decisions.append(await self._dispatcher.publish(event, now))
             except Exception:
                 logger.exception("이벤트 처리 실패: %s", event.ref_id)
         return decisions
+
+    async def _move_due(self, event: Event, now: datetime) -> None:
+        """마감이 바뀐 과제의 할 일 마감을 새 값으로 옮긴다. 리마인더가 새 마감을 기준으로 다시 센다."""
+        ref = str(event.meta.get("todo_ref", ""))
+        todo = await self._todos.get_by_ref(ref) if ref else None
+        if todo is None or todo.due_at == event.due_at:
+            return
+        await self._todos.update(todo.id, now, due_at=event.due_at)
 
     async def _close_submitted(self, event: Event, now: datetime) -> None:
         """제출이 확인된 과제의 할 일을 완료로 바꾼다. 이미 닫혔거나 없으면 그냥 둔다."""
