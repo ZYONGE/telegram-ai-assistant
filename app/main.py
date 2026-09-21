@@ -3,6 +3,7 @@
 실행: py -3.14 -m uv run python -m app.main
 """
 
+import asyncio
 import logging
 from logging.handlers import RotatingFileHandler
 from collections.abc import Awaitable, Callable
@@ -23,6 +24,7 @@ from app.agent.loop import Assistant
 from app.agent.memory import MarkdownMemoryStore
 from app.agent.prompt import PromptBuilder, load_identity
 from app.channels.telegram import TelegramNotifier
+from app.collectors.eclass.browse import EclassBrowser
 from app.collectors.eclass.collector import EclassCollector
 from app.collectors.eclass.scope import ScopeStore, ensure_scope
 from app.collectors.eclass.sources import build_sources
@@ -61,6 +63,7 @@ from app.storage.todos import TodoRepository
 from app.tools.archive import archive_tools
 from app.tools.calendar import calendar_tools, not_connected_tools
 from app.tools.eclass import eclass_tools
+from app.tools.eclass_browse import eclass_browse_tools
 from app.tools.mail import mail_tools, not_connected_mail_tools
 from app.tools.memory import memory_tools
 from app.tools.registry import ToolRegistry
@@ -126,6 +129,10 @@ async def create_runtime(settings: Settings, bot: Bot, llm: LLM | None = None) -
     registry = ToolRegistry(PendingActionStore(db))
     eclass_scope = ScopeStore(settings.eclass.scope_file)
     eclass_items = EclassRepository(db)
+    eclass_health = EclassHealthStore(db)
+    # 수집기와 그 자리 조회가 같은 세션 쿠키를 쓴다. 과목방 문을 여닫는 순서가 섞이지 않게 잠금 하나를 나눠 쓴다.
+    eclass_lock = asyncio.Lock()
+    eclass_browser = EclassBrowser(settings.eclass, eclass_lock, eclass_health)
     memory = MarkdownMemoryStore(settings.storage.memory_path)
     archive = ArchiveRepository(db)
     registry.register(
@@ -138,6 +145,7 @@ async def create_runtime(settings: Settings, bot: Bot, llm: LLM | None = None) -
         *(calendar_tools(google) if google.ready else not_connected_tools()),
         *(mail_tools(google, mail_rules, mail) if google.ready else not_connected_mail_tools()),
         *(eclass_tools(eclass_scope, eclass_items) if settings.eclass.enabled else ()),
+        *(eclass_browse_tools(eclass_browser) if settings.eclass.enabled else ()),
     )
 
     prompt = PromptBuilder(
@@ -163,7 +171,7 @@ async def create_runtime(settings: Settings, bot: Bot, llm: LLM | None = None) -
         honorific,
     )
     eclass_collector = EclassCollector(
-        settings.eclass, eclass_items, EclassHealthStore(db), EclassSourceStateStore(db)
+        settings.eclass, eclass_items, eclass_health, EclassSourceStateStore(db), lock=eclass_lock
     )
     if settings.eclass.enabled:
         # 탐색기가 만든 화면 목록을 보고 무엇을 가져올지 정한다. 새 화면이 생겼을 때만 다시 정한다.

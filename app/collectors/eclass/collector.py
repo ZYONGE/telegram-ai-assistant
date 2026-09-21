@@ -7,6 +7,7 @@
 - 로그인 연속 2회 실패면 자동화를 멈춘다. 사용자가 계정을 고치고 다시 켜야 한다 (CLAUDE.md 6절).
 """
 
+import asyncio
 import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -64,6 +65,7 @@ class EclassCollector:
         clock: Callable[[], datetime] = utc_now,
         session_factory: Callable[[EclassSettings], object] = EclassSession,
         sources: Sequence[EclassSource] | None = None,
+        lock: asyncio.Lock | None = None,
     ) -> None:
         self._settings = settings
         self._items = items
@@ -72,6 +74,8 @@ class EclassCollector:
         self._clock = clock
         self._session_factory = session_factory
         self._sources = list(sources) if sources is not None else default_sources()
+        # 비서가 그 자리에서 여는 창구(browse.py)와 세션 쿠키를 함께 쓴다. 과목방 문을 여닫는 순서가 섞이지 않게 한다.
+        self._lock = lock or asyncio.Lock()
 
     def set_sources(self, sources: Sequence[EclassSource]) -> None:
         """탐색 결과로 만든 소스로 바꾼다. 비서를 켤 때 한 번 부른다."""
@@ -129,6 +133,10 @@ class EclassCollector:
 
     async def _run(self, sources: list[EclassSource]) -> list[Harvest]:
         """세션 하나로 소스를 차례로 돌린다. 소스의 실패는 그 소스에만 남긴다."""
+        async with self._lock:
+            return await self._run_locked(sources)
+
+    async def _run_locked(self, sources: list[EclassSource]) -> list[Harvest]:
         session = self._session_factory(self._settings)
         await session.start()
         try:
