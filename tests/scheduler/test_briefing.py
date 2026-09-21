@@ -1,5 +1,8 @@
+from datetime import timedelta
+
 import pytest
 
+from app.core.clock import to_kst
 from app.core.events import EventKind
 from app.core.interfaces import BriefingItem, BriefingKind, GateAction, GateDecision
 from app.scheduler.briefing import BriefingService, NewsBriefing, TaskBriefing, TodoBriefing, compose
@@ -62,7 +65,7 @@ async def test_evening_briefing_content(todos, task_service, log, clock, provide
     assert "내일 마감\n· 내일 발표 (마감 9월 18일(금) 13:00)" in text
     assert "오늘 마감인데 남은 일\n· 오늘 낼 보고서" in text
     assert "내일 리마인더\n· 09:00 병원 예약" in text
-    assert "오늘 한 일\n· 할 일 1건 완료" in text
+    assert "오늘 한 일\n· 할 일 1건 완료: 끝낸 일" in text
 
 
 async def test_batched_news_appears_in_only_one_briefing(providers, log, dispatcher, notifier):
@@ -170,3 +173,40 @@ async def test_weekly_plan_leaves_news_for_the_daily_briefings(todos, task_servi
 async def test_empty_week_says_so(providers, dispatcher, notifier):
     await BriefingService(providers, dispatcher, None).send(BriefingKind.WEEKLY, kst(9, 20, 21))
     assert notifier.sent[0].text.endswith("다음 주에 챙길 마감이나 예약은 없습니다.")
+
+
+# --- 저녁 브리핑: 오늘 한 일, 이번 주 안에 할 일, 오늘 지난 일정 (사용자 지시 2026-09-21) ---
+
+
+async def test_evening_lists_what_is_due_within_the_week(todos, task_service, log, clock, providers, dispatcher, notifier):
+    await seed(todos, task_service, log, clock)
+    await todos.add("다음 주 과제", kst(9, 17, 6), due_at=kst(9, 23, 23, 59))
+    await todos.add("먼 마감", kst(9, 17, 6), due_at=kst(10, 30, 23, 59))
+
+    await BriefingService(providers, dispatcher, None).send(BriefingKind.EVENING, kst(9, 17, 22))
+    text = notifier.sent[0].text
+    section = text.split("이번 주 안에 할 일\n", 1)[1].split("\n\n", 1)[0]
+    assert "모레 시험" in section and "다음 주 과제" in section
+    assert "내일 발표" not in section and "먼 마감" not in text
+
+
+async def test_evening_calendar_shows_today_and_tomorrow():
+    from types import SimpleNamespace
+
+    from app.google.calendar import CalendarEvent
+    from app.scheduler.briefing import CalendarBriefing
+
+    def event(title, start):
+        return CalendarEvent(id=title, title=title, start=start, end=start + timedelta(hours=1))
+
+    class Accounts:
+        ready, multiple = True, False
+
+        async def events(self, start, end):
+            day = to_kst(start).day
+            found = [event("오늘 회의", kst(9, 17, 14))] if day == 17 else [event("내일 수업", kst(9, 18, 10))]
+            return SimpleNamespace(events=found, failed=[])
+
+    items = await CalendarBriefing(Accounts()).briefing_items(BriefingKind.EVENING, kst(9, 17, 22))
+    sections = {item.section: item.text for item in items}
+    assert "내일 수업" in sections["내일 일정"] and "오늘 회의" in sections["오늘 지난 일정"]

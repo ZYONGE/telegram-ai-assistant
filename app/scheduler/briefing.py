@@ -31,6 +31,10 @@ TITLES = {
 }
 # 주간 계획은 일요일 저녁에 다음 주(월~일)를 본다
 WEEK_DAYS = 7
+# 저녁 브리핑에서 "곧 해야 할 일"로 볼 범위 (사용자 지시: 근 시일 3~7일 안)
+SOON_DAYS = 7
+# 오늘 끝낸 일을 제목으로 보여 줄 수
+DONE_TITLES = 5
 
 
 class Polisher(Protocol):
@@ -79,10 +83,18 @@ class TodoBriefing:
         tomorrow = today + timedelta(days=1)
         items = [BriefingItem("내일 마감", _todo_line(t), 30) for t in todos if _day(t.due_at) == tomorrow]
         items += [BriefingItem("오늘 마감인데 남은 일", _todo_line(t), 25) for t in todos if _day(t.due_at) == today]
+        # 근 시일 안에 해결해야 하는 일 (사용자 지시)
+        items += [
+            BriefingItem("이번 주 안에 할 일", _todo_line(t), 16)
+            for t in todos
+            if tomorrow < _day(t.due_at) <= today + timedelta(days=SOON_DAYS)
+        ]
         start = datetime.combine(today, time(0), tzinfo=KST)
         done = await self._repo.list_done_between(start, now)
         if done:
-            items.append(BriefingItem("오늘 한 일", f"할 일 {len(done)}건 완료", 5))
+            titles = ", ".join(t.title for t in done[:DONE_TITLES])
+            more = f" 외 {len(done) - DONE_TITLES}건" if len(done) > DONE_TITLES else ""
+            items.append(BriefingItem("오늘 한 일", f"할 일 {len(done)}건 완료: {titles}{more}", 5))
         return items
 
 
@@ -138,6 +150,13 @@ class CalendarBriefing:
             BriefingItem(section, event.render(with_date=days > 1, with_account=show_account), priority)
             for event in result.events
         ]
+        if kind is BriefingKind.EVENING:
+            # 오늘 지나간 일정도 짚는다 (사용자 지시: 저녁에는 오늘 처리한 일정)
+            start_today = datetime.combine(today, time(0), tzinfo=KST)
+            past = await self._accounts.events(start_today, start_today + timedelta(days=1))
+            items += [
+                BriefingItem("오늘 지난 일정", event.render(with_account=show_account), 7) for event in past.events
+            ]
         for first_event, second_event in overlapping_pairs(result.events):
             items.append(
                 BriefingItem(
