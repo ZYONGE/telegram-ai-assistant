@@ -36,9 +36,10 @@ sudo systemsetup -settimezone Asia/Seoul
 sudo pmset -a disablesleep 1
 ```
 
-`pmset -g` 로 `sleep 0` 인지 확인한다. **뚜껑을 닫아도 돌아간다.**
+`pmset -g` 로 `SleepDisabled 1` 인지 확인한다. **뚜껑을 닫아도, 배터리로만 돌려도 잠들지 않는다** (`-a`는 전원·배터리 모두).
 
-전원은 늘 꽂아 둔다. 배터리 충전 상한은 이미 설정하셨다.
+전원은 꽂아 두지 않아도 된다. 배터리가 떨어지기 전에 사용자가 충전한다 (2026-09-21 사용자 결정).
+배터리가 다 닳으면 맥북이 꺼지고 봇도 멈춘다. 충전 뒤 켜면 launchd가 봇을 다시 띄운다 (FileVault를 꺼 두었으므로 로그인 없이).
 
 ### 1-2. 자동 로그인은 켜지 않는다
 
@@ -165,9 +166,46 @@ tail -f private/logs/assistant.log
 | 재시작 | `sudo launchctl kickstart -k system/com.assistant.bot` |
 | 멈추기 | `sudo launchctl unload /Library/LaunchDaemons/com.assistant.bot.plist` |
 | 새 코드 반영 | `git pull && uv sync --no-dev && sudo launchctl kickstart -k system/com.assistant.bot` |
+| 새 코드 반영 (개발 PC에서 원격으로) | 아래 3-5 |
 | 재시작 (sudo 없이, 원격) | `kill -9 $(pgrep -f "python -m app.main")` — 비정상 종료로 보고 launchd가 몇 초 안에 다시 띄운다 (2026-09-22 확인). `kill`(SIGTERM)은 정상 종료라 다시 뜨지 않는다. 조용한 시간처럼 한가할 때 한다 |
 
-### 3-5. 되돌리기
+### 3-5. 개발 PC에서 원격으로 반영하기
+
+SSH로 명령만 보내면 로그인 셸 설정을 읽지 않아 `uv`가 PATH에 없다. **전체 경로 `~/.local/bin/uv`를 쓴다.**
+DB 구조가 바뀌는 코드(마이그레이션)를 받을 때는 먼저 DB를 떠 둔다. `sqlite3`의 `.backup`은 봇이 켜져 있어도 온전한 사본을 만든다.
+
+```bash
+ssh 사용자이름@<Tailscale 주소> 'cd ~/telegram-ai-assistant \
+  && sqlite3 private/assistant.db ".backup private/backups/pre-deploy-$(date +%Y%m%d)/assistant.db" \
+  && git pull && ~/.local/bin/uv sync --no-dev \
+  && kill -9 $(pgrep -f "python -m app.main")'
+```
+
+`.backup` 앞에 폴더가 있어야 한다 (`mkdir -p private/backups/pre-deploy-날짜`). 재시작은 조용한 시간처럼 한가할 때 한다.
+확인: `tail -20 private/logs/assistant.log` 에 "비서를 시작합니다"와 "스케줄러 시작"이 찍히면 된다.
+
+### 3-6. 개인 파일 고치기
+
+**서버의 `private/`가 원본이다** (2026-09-22부터). 개발 PC의 사본은 오래됐다. 개인 파일은 서버에서 고친다.
+
+| 방법 | 명령 |
+|---|---|
+| 맥북에서 직접 | `open -e ~/telegram-ai-assistant/private/instructions.md` |
+| 개발 PC에서 SSH로 들어가서 | `ssh 사용자이름@<Tailscale 주소>` → `nano ~/telegram-ai-assistant/private/instructions.md` (`Ctrl+O` 저장, `Ctrl+X` 나가기) |
+| 개발 PC에서 고쳐 보내기 | `scp private/instructions.md 사용자이름@<Tailscale 주소>:telegram-ai-assistant/private/instructions.md` — **서버 파일을 통째로 덮어쓴다.** 서버에서 고친 내용이 있으면 사라지므로 한쪽에서만 고친다 |
+
+VS Code의 Remote - SSH 확장으로 서버 파일을 개발 PC 화면에서 바로 열어도 된다.
+
+고친 뒤 재시작이 필요한지:
+
+| 파일 | 적용 |
+|---|---|
+| `instructions.md` | 저장하면 바로 (대화·알림·브리핑이 부를 때마다 다시 읽는다) |
+| `profile.md` | 대화에는 바로. 호칭을 바꿨으면 재시작 (브리핑 인사말은 켤 때 읽는다) |
+| `.env`, `local.toml` | 재시작해야 적용 |
+| `memory.md` | 봇이 쓰는 파일이라 손대지 않는다. 기억 삭제는 대화로 요청한다 |
+
+### 3-7. 되돌리기
 
 ```bash
 sudo launchctl unload /Library/LaunchDaemons/com.assistant.bot.plist

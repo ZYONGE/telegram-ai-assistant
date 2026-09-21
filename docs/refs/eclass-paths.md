@@ -57,12 +57,12 @@ GET  /ilos/st/course/submain_form.acl      ← 방 첫 화면
 | 공지사항 | `/ilos/st/course/notice_list.acl` | 날짜. 휴강·시험 변경이 여기로 온다 |
 | 과제 | `/ilos/st/course/report_list.acl` | 마감·제출 여부·점수 |
 | 시험 | `/ilos/st/course/test_list_form.acl` | 마감 |
-| 온라인강의 | `/ilos/st/course/online_list.acl` | 빈 응답이 와서 요청 방식 확인이 더 필요하다 |
+| 온라인강의 | `/ilos/st/course/online_list_form.acl` → `online_list.acl` | 내용 요청에 `ud`(학번)·`ky`(과목 열쇠)·`WEEK_NO`(주차)를 보내야 한다. 빼면 빈 응답 (2026-09-22 확인). 주차는 껍데기의 `.wb[id^=week-]`, 지금 주는 `wb-choice`. 강의별 진도율·학습 시간이 나온다 |
 | 실시간강의 | `/ilos/st/course/zoom_list.acl` | |
 | 강의자료 | `/ilos/st/course/lecture_material_list.acl` | 날짜 |
 | 열린게시판 | `/ilos/st/course/material_list_form.acl` | |
 | 강의계획서 | `/ilos/st/course/plan_form.acl` | 게시판이 아니라 `table.bbsview` 두 개(과목 정보, 주차별)다. 한 줄에 이름·내용이 두 쌍씩 들어 있다. 학기에 한 번 바뀌므로 하루 1회 |
-| 출석 | `/ilos/st/course/attendance_list.acl` | |
+| 출석 | `/ilos/st/course/attendance_list_form.acl` → `attendance_list.acl` | `ud`·`ky`를 보내야 한다. 빼면 "접근 권한이 없습니다". 표가 아니라 글로 온다 (출석·지각·결석 수, 차시별 상태) |
 | 성적 | `/ilos/st/course/eval3_result_view_form.acl` | |
 | 팀프로젝트 | `/ilos/st/course/project_list.acl` | |
 | 토론 | `/ilos/st/course/discuss_list.acl` | |
@@ -82,6 +82,26 @@ GET  /ilos/st/course/submain_form.acl      ← 방 첫 화면
 | 올린 파일함 | `/ilos/mp/file_list_form.acl` → `/ilos/mp/file_list.acl` | 껍데기 + 내용 |
 | 질의응답 | `/ilos/community/qna_list_form.acl` → `/ilos/community/qna_list.acl` | 껍데기 + 내용 |
 
+### 내용 요청에 보낼 값 읽기
+
+껍데기 화면의 스크립트에 `$.ajax({ url: "…_list.acl", data: { … } })`로 적혀 있다.
+과목 공지·과제·강의자료·설문도 `ud`·`ky`를 함께 보낸다 (없어도 되는 화면이 있지만 보내는 편이 안전하다).
+**값을 코드에 적지 않고 화면에서 읽는다** (`app/collectors/eclass/page.py`의 `list_request`). 학번이 들어 있으므로 요청에만 쓰고 로그·결과에 옮기지 않는다.
+따옴표로 적힌 값은 그대로, 스크립트가 실행 때 채우는 값은 `start`=쪽 번호, `WEEK_NO`=주차, 나머지는 빈 값으로 보낸다.
+
+### 그 밖에 확인한 것 (2026-09-22)
+
+| 무엇 | 경로·방식 |
+|---|---|
+| 과제 제출 여부 | 과제 목록 '제출' 칸. 글자가 아니라 **그림의 alt**("제출"/"미제출")에 있다. "미제출"에도 "제출"이 들어 있으니 정확히 일치로 본다 |
+| 과제 상세 | `report_view_form.acl?RT_SEQ=…`. `table.bbsview`(제출방식·마감일·지각제출·점수공개) + `.textviewer` 본문. 본문 끝에 "첨부파일(N개) - 이름"이 붙는다 |
+| 과제 번호 | 과제 게시판 글번호(`RT_SEQ`)와 할 일 목록의 번호가 같다. 이것으로 할 일과 이어진다 |
+| 시험 상세 | `test_view_form.acl?exam_setup_seq=…`. 시험 정보 `bbsview` + 응시 기록 표(시작·종료·IP) + 점수. 여는 것만으로는 응시가 시작되지 않는다 |
+| 받은 쪽지 열기 | 목록의 `viewPage('SEQ','SEND_ID')` → `/ilos/message/received_view_pop_form.acl?SEQ=…&SEND_ID=…` (GET) |
+| 알림함 | `POST /ilos/mp/notification_list.acl` (`start`, `display`, `OPEN_DTM`=빈 값). 표가 아니라 글로 온다 |
+| 성적 | `eval3_result_view_form.acl`. 공개 전에는 "최종성적이 공개되지 않았습니다" |
+| 과목 선택 목록 | 할 일 화면의 과목 선택 상자가 법정의무교육 같은 비교과까지 15과목을 준다. `course_ing_list`는 다른 학생의 청강 과목까지 섞여 있어 쓰지 않는다 |
+
 ## 5. 열지 않는 주소
 
 탐색기가 막는다 (`UNSAFE_WORDS`). 조회만 하기로 한 약속이다 (CLAUDE.md 절대 규칙 5).
@@ -89,6 +109,9 @@ GET  /ilos/st/course/submain_form.acl      ← 방 첫 화면
 - 바꾸는 것: `submit` `insert` `update` `delete` `remove` `save` `modify` `write` `regist` `apply` `cancel` `upload` `proc` `exec`
 - 내려받기: `down`이 들어간 모든 주소, `attach`
 - 세션을 끊는 것: `logout`
+- 비서의 즉석 조회는 여기에 더해 `start`·`take`·`answer`·`exam`·`vote`·`reply`·`comment`·`button`·`check`와
+  강의 재생(`online_view`·`play`·`viewer`·`movie`·`vod`)을 막고, 조회 화면 이름(`_list`·`_view`·`plan_form` 등)만 연다.
+  강의 재생 화면은 여는 것만으로 수강 기록이 남는다.
 
 한 가지 더: 머리글 스크립트가 **모든 화면에 똑같이** 들어 있어, 화면마다 스크립트를 훑으면
 같은 메뉴를 끝없이 다시 찾는다. 스크립트 훑기는 메뉴가 있는 첫 화면에서만 한다.
