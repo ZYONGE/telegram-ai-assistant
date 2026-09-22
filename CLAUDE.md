@@ -47,7 +47,7 @@
 | eClass 수집 | **httpx + BeautifulSoup** (순수 HTTP. 로그인도 된다는 것을 확인하고 Playwright를 걷어냈다, T-23, `docs/adr/0008`). 비서가 그 자리에서 여는 조회 도구도 같은 세션을 쓴다 (T-30) |
 | 첨부 파일 읽기 | pypdf(BSD-3)·olefile(BSD-2) + 표준 라이브러리(HWPX·DOCX·PPTX·XLSX). 파일은 저장하지 않는다 (`app/collectors/documents.py`) |
 | 시간 | 저장은 UTC, 판단·표시는 `Asia/Seoul` |
-| 배포 | **임시: 맥북에어 M1 (8GB, macOS) — 네이티브 venv + launchd LaunchDaemon(`KeepAlive`)**. Docker Desktop은 쓰지 않는다 (`docs/adr/0008`). Oracle Cloud는 쓰지 않기로 했다 (2026-09-21 사용자 결정). Docker 파일(`deploy/`)은 다른 서버로 옮길 때를 위해 남겨 둔다 |
+| 배포 | **맥북에어 M1 (8GB, macOS) — 네이티브 venv + launchd LaunchDaemon(`KeepAlive`)**. 운영 절차는 `deploy/macos/README.md`. Docker Desktop은 쓰지 않는다 (`docs/adr/0008`). Oracle Cloud는 쓰지 않기로 했다 (2026-09-21 사용자 결정). Docker 파일(`deploy/`)은 다른 서버로 옮길 때를 위해 남겨 둔다 |
 | 원격 관리 | SSH + Tailscale. 포트를 밖에 열지 않는다 |
 | 개발 | 윈도우 데스크톱·맥북에서 개발 → GitHub → 서버에서 pull 후 재시작. **개발 맥북과 서버 맥북에어는 다른 기기다** |
 
@@ -78,7 +78,7 @@ assistant/
 ├─ docs/             # 설계 문서, ADR, 레퍼런스 메모
 ├─ refs/             # 참고 오픈소스 클론 (git 제외, 읽기 전용)
 ├─ tests/
-└─ deploy/           # 서버 설정 (macos/: 맥북 임시 서버의 launchd, 나머지: OCI A1용 Docker)
+└─ deploy/           # 서버 설정 (macos/: 맥북에어 서버의 launchd·운영 절차, 나머지: 리눅스 서버용 Docker — 지금은 쓰지 않는다)
 ```
 
 두 가지 흐름으로 설계한다.
@@ -243,14 +243,14 @@ eClass 시험 응시, 영구 삭제, 그리고 사용자를 대신해 밖으로 
 | 5 | Google 연동: 캘린더, Gmail 요약·규칙·답변 대기·되돌리기 | 규칙별 동작 테스트 통과 |
 | 6 | eClass 수집기: 라이선스 확인 → SSO 로그인 → 과제·공지 → 마감 변경 감지 → 학사일정 | 실패 처리 포함 테스트 통과 |
 | 7 | 감시 기능: 인턴 지원 관리, 채용 공고 감시, 교환학생 공지 | 각 기능 테스트 통과 (**후순위: 8단계 뒤로 미룸**) |
-| 8 | 운영: 맥북에어 임시 서버 배포(추후 OCI A1 이전), 야간 백업, 수집 실패 알림, 로그 | 서버에서 24시간 동작 |
+| 8 | 운영: 맥북에어 서버 배포, 야간 백업, 수집 실패 알림, 로그 | 서버에서 24시간 동작 |
 
 `prompts/system_prompt.md`는 v0.10이다 (호칭은 `{honorific}` 자리표시). 기능이 늘 때마다 "할 수 있는 일"과 "실행과 확인" 절을 갱신한다.
 
 ## 10. 진행 상태
 
 - 현재 단계: **8 진행 중 (2026-09-22)**. 6단계는 완료(2026-09-20). 8단계는 백업·실패 재알림·로그까지 끝났고, 맥북에어에서 상시 운영 중이다. 사용자 지시 파일 반영(T-29~T-35)을 마쳤다.
-  **호스팅**: 맥북에어 M1(8GB)을 서버로 쓴다 (ADR 0008). Oracle Cloud는 쓰지 않기로 했다 (2026-09-21). 도커 경로(T-13·T-14)는 보류.
+  **호스팅**: 맥북에어 M1(8GB)을 서버로 쓴다 (ADR 0008). Oracle Cloud는 쓰지 않기로 했다 (2026-09-21). 도커 경로(T-13·T-14)는 폐기했다 (Docker 파일은 남겨 둔다).
   **서버의 `private/`가 원본이다.** 윈도우 PC의 사본은 2026-09-21 이후 갱신되지 않았다. 개인 파일을 고칠 때는 서버에서 고친다.
   남은 일은 하루치 메모리 관찰(T-27)이다.
   7단계(감시 기능)는 후순위다 — 상시 운영이 된 뒤에 붙이는 것이 맞다.
@@ -259,6 +259,7 @@ eClass 시험 응시, 영구 삭제, 그리고 사용자를 대신해 밖으로 
 - **작업을 시작하기 전에 `docs/tasks.md`의 맨 위 `대기` 항목을 본다.** 다음에 할 일은 그 문서 한 곳에만 있다. 항목을 끝내면 상태를 바꾸고, 새로 생긴 할 일도 거기에 적는다.
 - 지금 무엇이 되는지, 외부 연동 현황, 운영 방법, 개발 환경 메모는 `docs/progress.md`에 있다. 단계를 마칠 때마다 두 문서를 함께 갱신한다.
 - 7단계(인턴·교환학생 감시)는 8단계 뒤로 미뤘다 (2026-09-20 사용자 결정).
-- 실행: `py -3.14 -m uv run python -m app.main` (Ctrl+C로 종료)
-- Google 계정 연결: `py -3.14 -m uv run python -m app.google.login <계정 이름>` (이름 없이 실행하면 연결 상태만 보여 준다)
+- **봇은 서버(맥북에어)에서 launchd로 24시간 돈다. 다른 기기에서 봇을 띄우지 않는다** — 같은 토큰으로 두 곳이 텔레그램을 물면 서로 메시지를 빼앗는다. 서버의 상태 확인·재시작·새 코드 반영은 `deploy/macos/README.md` 3절.
+  - 개발 기기에서 손으로 띄워 봐야 한다면 서버를 먼저 멈추고, 끝나면 다시 켠다. 실행: 윈도우 `py -3.14 -m uv run python -m app.main`, 맥 `uv run python -m app.main` (Ctrl+C로 종료). 개발 기기의 `private/`는 서버보다 오래된 사본이다.
+- Google 계정 연결: `uv run python -m app.google.login <계정 이름>` (윈도우는 앞에 `py -3.14 -m`. 이름 없이 실행하면 연결 상태만 보여 준다). 토큰이 그 기기의 `private/`에 생기므로 **서버에서 한다** (서버의 `private/`가 원본이다).
 - 새 컴퓨터에서 받으면 `git config core.hooksPath .githooks`로 커밋 검사 훅을 켜고, `templates/`의 양식을 `private/`로 복사해 채운다 (`env.example` → `private/.env`, `profile.example.md` → `private/profile.md`, `instructions.example.md` → `private/instructions.md`).
